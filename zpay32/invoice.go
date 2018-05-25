@@ -285,28 +285,28 @@ func Decode(invoice string) (*Invoice, error) {
 	// meant for.
 	var net *btcCfg.Params
 	switch {
-	case strings.HasPrefix(hrp[2:], btcCfg.MainNetParams.Bech32HRPSegwit):
+	case strings.HasPrefix(hrp[2:], btcCfg.MainNetParams.Bech32HRPSegwit[:2]):
 		net = &btcCfg.MainNetParams
 
-	case strings.HasPrefix(hrp[2:], btcCfg.TestNet3Params.Bech32HRPSegwit):
+	case strings.HasPrefix(hrp[2:], btcCfg.TestNet3Params.Bech32HRPSegwit[:2]):
 		net = &btcCfg.TestNet3Params
 
-	case strings.HasPrefix(hrp[2:], btcCfg.SimNetParams.Bech32HRPSegwit):
+	case strings.HasPrefix(hrp[2:], btcCfg.SimNetParams.Bech32HRPSegwit[:2]):
 		net = &btcCfg.SimNetParams
 
-	case strings.HasPrefix(hrp[2:], btcCfg.RegressionNetParams.Bech32HRPSegwit):
+	case strings.HasPrefix(hrp[2:], btcCfg.RegressionNetParams.Bech32HRPSegwit[:2]):
 		net = &btcCfg.RegressionNetParams
 
-	case strings.HasPrefix(hrp[2:], ltcCfg.MainNetParams.Bech32HRPSegwit):
+	case strings.HasPrefix(hrp[2:], ltcCfg.MainNetParams.Bech32HRPSegwit[:2]):
 		net = ltcToBtcParams(&ltcCfg.MainNetParams)
 
-	case strings.HasPrefix(hrp[2:], ltcCfg.TestNet4Params.Bech32HRPSegwit):
+	case strings.HasPrefix(hrp[2:], ltcCfg.TestNet4Params.Bech32HRPSegwit[:2]):
 		net = ltcToBtcParams(&ltcCfg.TestNet4Params)
 
-	case strings.HasPrefix(hrp[2:], ltcCfg.SimNetParams.Bech32HRPSegwit):
+	case strings.HasPrefix(hrp[2:], ltcCfg.SimNetParams.Bech32HRPSegwit[:2]):
 		net = ltcToBtcParams(&ltcCfg.SimNetParams)
 
-	case strings.HasPrefix(hrp[2:], ltcCfg.RegressionNetParams.Bech32HRPSegwit):
+	case strings.HasPrefix(hrp[2:], ltcCfg.RegressionNetParams.Bech32HRPSegwit[:2]):
 		net = ltcToBtcParams(&ltcCfg.RegressionNetParams)
 
 	default:
