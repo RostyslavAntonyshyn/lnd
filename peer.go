@@ -392,8 +392,7 @@ func (p *peer) loadActiveChannels(chans []*channeldb.OpenChannel) error {
 
 		peerLog.Tracef("Using link policy of: %v", spew.Sdump(forwardingPolicy))
 
-		chainRealmMap := p.server.universe.ChainRealmMap()
-		realmCode := chainRealmMap[dbChan.ChainHash]
+		realmCode := cs.code
 
 		// Register this new channel link with the HTLC Switch. This is
 		// necessary to properly route multi-hop payments, and forward

@@ -310,6 +310,10 @@ func (l *channelLink) Stop() {
 	l.cfg.BlockEpochs.Cancel()
 }
 
+func (l *channelLink) Network() NetworkHop {
+	return l.cfg.Network
+}
+
 // htlcManager is the primary goroutine which drives a channel's commitment
 // update state-machine in response to messages received via several channels.
 // This goroutine reads messages from the upstream (remote) peer, and also from
@@ -1367,6 +1371,12 @@ func (l *channelLink) processLockedInHtlcs(
 				// incoming HTLC must carry in order to be
 				// accepted.
 				var expectedFee lnwire.MilliSatoshi
+
+				// fix forward network
+				cl,_ := l.cfg.Switch.getLinkByShortID(fwdInfo.NextHop)
+				fwdInfo.Network = cl.Network()
+
+
 				if l.cfg.Network == fwdInfo.Network {
 					expectedFee = ExpectedFee(
 						l.cfg.FwrdingPolicy,

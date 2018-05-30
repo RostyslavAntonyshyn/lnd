@@ -382,6 +382,7 @@ func (f *mockChannelLink) Bandwidth() lnwire.MilliSatoshi     { return 99999999 
 func (f *mockChannelLink) Peer() Peer                         { return f.peer }
 func (f *mockChannelLink) Start() error                       { return nil }
 func (f *mockChannelLink) Stop()                              {}
+func (f *mockChannelLink) Network()	NetworkHop				  { return 0 }
 
 var _ ChannelLink = (*mockChannelLink)(nil)
 
