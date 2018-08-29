@@ -7,11 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/lightninglabs/neutrino"
-	"github.com/lightningnetwork/lnd/chainntnfs"
 	"github.com/lightningnetwork/lnd/chainntnfs/btcdnotify"
 	"github.com/lightningnetwork/lnd/chainntnfs/neutrinonotify"
 	"github.com/lightningnetwork/lnd/channeldb"
@@ -19,10 +17,11 @@ import (
 	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/lightningnetwork/lnd/lnwallet/btcwallet"
 	"github.com/lightningnetwork/lnd/lnwire"
+	"github.com/lightningnetwork/lnd/realm"
 	"github.com/lightningnetwork/lnd/routing/chainview"
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
 	"github.com/roasbeef/btcd/rpcclient"
-	"github.com/roasbeef/btcwallet/chain"
+	bchain "github.com/roasbeef/btcwallet/chain"
 	"github.com/roasbeef/btcwallet/walletdb"
 )
 
@@ -33,6 +32,12 @@ var defaultBitcoinForwardingPolicy = htlcswitch.ForwardingPolicy{
 	BaseFee:       lnwire.NewMSatFromSatoshis(1),
 	FeeRate:       1,
 	TimeLockDelta: 144,
+	ExchangeRates: map[htlcswitch.NetworkHop]float64{
+		htlcswitch.LitecoinHop: 100.0,
+	},
+	InterRealmTimeScale: map[htlcswitch.NetworkHop]float64{
+		htlcswitch.LitecoinHop: 4.0,
+	},
 }
 
 // defaultLitecoinForwardingPolicy is the default forwarding policy used for
@@ -42,6 +47,12 @@ var defaultLitecoinForwardingPolicy = htlcswitch.ForwardingPolicy{
 	BaseFee:       1,
 	FeeRate:       1,
 	TimeLockDelta: 576,
+	ExchangeRates: map[htlcswitch.NetworkHop]float64{
+		htlcswitch.BitcoinHop: 0.01,
+	},
+	InterRealmTimeScale: map[htlcswitch.NetworkHop]float64{
+		htlcswitch.BitcoinHop: 0.25,
+	},
 }
 
 // defaultChannelConstraints is the default set of channel constraints that are
@@ -53,6 +64,7 @@ var defaultChannelConstraints = channeldb.ChannelConstraints{
 	MaxAcceptedHtlcs: lnwallet.MaxHTLCNumber / 2,
 }
 
+/*
 // chainCode is an enum-like structure for keeping track of the chains
 // currently supported within lnd.
 type chainCode uint32
@@ -76,237 +88,238 @@ func (c chainCode) String() string {
 		return "kekcoin"
 	}
 }
-
-// chainControl couples the three primary interfaces lnd utilizes for a
-// particular chain together. A single chainControl instance will exist for all
-// the chains lnd is currently active on.
-type chainControl struct {
-	chainIO lnwallet.BlockChainIO
-
-	feeEstimator lnwallet.FeeEstimator
-
-	signer lnwallet.Signer
-
-	msgSigner lnwallet.MessageSigner
-
-	chainNotifier chainntnfs.ChainNotifier
-
-	chainView chainview.FilteredChainView
-
-	wallet *lnwallet.LightningWallet
-
-	routingPolicy htlcswitch.ForwardingPolicy
-}
+*/
 
 // newChainControlFromConfig attempts to create a chainControl instance
 // according to the parameters in the passed lnd configuration. Currently two
 // branches of chainControl instances exist: one backed by a running btcd
 // full-node, and the other backed by a running neutrino light client instance.
 func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
-	privateWalletPw, publicWalletPw []byte) (*chainControl, func(), error) {
+	privateWalletPw, publicWalletPw []byte) (func(), error) {
 
-	// Set the RPC config from the "home" chain. Multi-chain isn't yet
-	// active, so we'll restrict usage to a particular chain for now.
-	homeChainConfig := cfg.Bitcoin
-	if registeredChains.PrimaryChain() == litecoinChain {
-		homeChainConfig = cfg.Litecoin
-	}
-	ltndLog.Infof("Primary chain is set to: %v",
-		registeredChains.PrimaryChain())
+	realms := universe.Realms()
 
-	cc := &chainControl{}
+	var cleanUpFuncs = make([]func() error, 0, len(realms))
 
-	switch registeredChains.PrimaryChain() {
-	case bitcoinChain:
-		cc.routingPolicy = defaultBitcoinForwardingPolicy
-		cc.feeEstimator = lnwallet.StaticFeeEstimator{
-			FeeRate: 50,
+	cleanUp := func() {
+		for _, cleanUpFunc := range cleanUpFuncs {
+			cleanUpFunc()
 		}
-	case litecoinChain:
-		cc.routingPolicy = defaultLitecoinForwardingPolicy
-		cc.feeEstimator = lnwallet.StaticFeeEstimator{
-			FeeRate: 100,
-		}
-	default:
-		return nil, nil, fmt.Errorf("Default routing policy for "+
-			"chain %v is unknown", registeredChains.PrimaryChain())
 	}
 
-	walletConfig := &btcwallet.Config{
-		PrivatePass:  privateWalletPw,
-		PublicPass:   publicWalletPw,
-		DataDir:      homeChainConfig.ChainDir,
-		NetParams:    activeNetParams.Params,
-		FeeEstimator: cc.feeEstimator,
-	}
-
-	var (
-		err     error
-		cleanUp func()
-	)
-
-	// If spv mode is active, then we'll be using a distinct set of
-	// chainControl interfaces that interface directly with the p2p network
-	// of the selected chain.
-	if cfg.NeutrinoMode.Active {
-		// First we'll open the database file for neutrino, creating
-		// the database if needed.
-		dbName := filepath.Join(cfg.DataDir, "neutrino.db")
-		nodeDatabase, err := walletdb.Create("bdb", dbName)
-		if err != nil {
-			return nil, nil, err
+	for _, realmCode := range realms {
+		var chainConf *chainConfig
+		switch realmCode {
+		case realm.BTC:
+			chainConf = cfg.Bitcoin
+		case realm.LTC:
+			chainConf = cfg.Litecoin
+		default:
+			return nil, fmt.Errorf("Cannot create chain control "+
+				"for unknown chain %v", realmCode)
 		}
 
-		// With the database open, we can now create an instance of the
-		// neutrino light client. We pass in relevant configuration
-		// parameters required.
-		config := neutrino.Config{
-			DataDir:      cfg.DataDir,
-			Database:     nodeDatabase,
-			ChainParams:  *activeNetParams.Params,
-			AddPeers:     cfg.NeutrinoMode.AddPeers,
-			ConnectPeers: cfg.NeutrinoMode.ConnectPeers,
-		}
-		neutrino.WaitForMoreCFHeaders = time.Second * 1
-		neutrino.MaxPeers = 8
-		neutrino.BanDuration = 5 * time.Second
-		svc, err := neutrino.NewChainService(config)
-		if err != nil {
-			return nil, nil, fmt.Errorf("unable to create neutrino: %v", err)
-		}
-		svc.Start()
+		ltndLog.Infof("Creating chain control for: %v", realmCode)
 
-		// Next we'll create the instances of the ChainNotifier and
-		// FilteredChainView interface which is backed by the neutrino
-		// light client.
-		cc.chainNotifier, err = neutrinonotify.New(svc)
-		if err != nil {
-			return nil, nil, err
-		}
-		cc.chainView, err = chainview.NewCfFilteredChainView(svc)
-		if err != nil {
-			return nil, nil, err
-		}
+		cc := &realm.ChainControl{}
 
-		// Finally, we'll set the chain source for btcwallet, and
-		// create our clean up function which simply closes the
-		// database.
-		walletConfig.ChainSource = chain.NewNeutrinoClient(svc)
-		cleanUp = func() {
-			defer nodeDatabase.Close()
-		}
-	} else {
-		// Otherwise, we'll be speaking directly via RPC to a node.
-		//
-		// So first we'll load btcd/ltcd's TLS cert for the RPC
-		// connection. If a raw cert was specified in the config, then
-		// we'll set that directly. Otherwise, we attempt to read the
-		// cert from the path specified in the config.
-		var rpcCert []byte
-		if homeChainConfig.RawRPCCert != "" {
-			rpcCert, err = hex.DecodeString(homeChainConfig.RawRPCCert)
-			if err != nil {
-				return nil, nil, err
+		switch realmCode {
+		case realm.BTC:
+			cc.RoutingPolicy = defaultBitcoinForwardingPolicy
+			cc.FeeEstimator = lnwallet.StaticFeeEstimator{
+				FeeRate: 50,
 			}
+		case realm.LTC:
+			cc.RoutingPolicy = defaultLitecoinForwardingPolicy
+			cc.FeeEstimator = lnwallet.StaticFeeEstimator{
+				FeeRate: 200,
+			}
+		default:
+			return nil, fmt.Errorf("Default routing policy for chain %v "+
+				"is unknown", realmCode)
+		}
+
+		netParams, err := universe.Param(realmCode)
+		if err != nil {
+			return nil, fmt.Errorf("No network params registered for chain %v", realmCode)
+		}
+
+		walletConfig := &btcwallet.Config{
+			PrivatePass:  privateWalletPw,
+			PublicPass:   publicWalletPw,
+			DataDir:      chainConf.ChainDir,
+			NetParams:    netParams.Params,
+			FeeEstimator: cc.FeeEstimator,
+		}
+
+		// If spv mode is active, then we'll be using a distinct set of
+		// chainControl interfaces that interface directly with the p2p network
+		// of the selected chain.
+		if cfg.NeutrinoMode.Active {
+			// First we'll open the database file for neutrino, creating
+			// the database if needed.
+			dbName := filepath.Join(cfg.DataDir, "neutrino.db")
+			nodeDatabase, err := walletdb.Create("bdb", dbName)
+			if err != nil {
+				return cleanUp, err
+			}
+
+			// With the database open, we can now create an instance of the
+			// neutrino light client. We pass in relevant configuration
+			// parameters required.
+			config := neutrino.Config{
+				DataDir:      cfg.DataDir,
+				Database:     nodeDatabase,
+				ChainParams:  *netParams.Params,
+				AddPeers:     cfg.NeutrinoMode.AddPeers,
+				ConnectPeers: cfg.NeutrinoMode.ConnectPeers,
+			}
+			neutrino.WaitForMoreCFHeaders = time.Second * 1
+			neutrino.MaxPeers = 8
+			neutrino.BanDuration = 5 * time.Second
+			svc, err := neutrino.NewChainService(config)
+			if err != nil {
+				return cleanUp, fmt.Errorf("unable to create neutrino: %v", err)
+			}
+			svc.Start()
+
+			// Next we'll create the instances of the ChainNotifier and
+			// FilteredChainView interface which is backed by the neutrino
+			// light client.
+			cc.ChainNotifier, err = neutrinonotify.New(svc)
+			if err != nil {
+				return cleanUp, err
+			}
+			cc.ChainView, err = chainview.NewCfFilteredChainView(svc)
+			if err != nil {
+				return cleanUp, err
+			}
+
+			// Finally, we'll set the chain source for btcwallet, and
+			// create our clean up function which simply closes the
+			// database.
+			walletConfig.ChainSource = bchain.NewNeutrinoClient(svc)
+
+			cleanUpFuncs = append(cleanUpFuncs, nodeDatabase.Close)
 		} else {
-			certFile, err := os.Open(homeChainConfig.RPCCert)
+			// Otherwise, we'll be speaking directly via RPC to a node.
+			//
+			// So first we'll load btcd/ltcd's TLS cert for the RPC
+			// connection. If a raw cert was specified in the config, then
+			// we'll set that directly. Otherwise, we attempt to read the
+			// cert from the path specified in the config.
+			var rpcCert []byte
+			if chainConf.RawRPCCert != "" {
+				rpcCert, err = hex.DecodeString(chainConf.RawRPCCert)
+				if err != nil {
+					return cleanUp, err
+				}
+			} else {
+				certFile, err := os.Open(chainConf.RPCCert)
+				if err != nil {
+					return cleanUp, err
+				}
+				rpcCert, err = ioutil.ReadAll(certFile)
+				if err != nil {
+					return cleanUp, err
+				}
+				if err := certFile.Close(); err != nil {
+					return cleanUp, err
+				}
+			}
+
+			// If the specified host for the btcd/ltcd RPC server already
+			// has a port specified, then we use that directly. Otherwise,
+			// we assume the default port according to the selected chain
+			// parameters.
+			var btcdHost string
+			if strings.Contains(chainConf.RPCHost, ":") {
+				btcdHost = chainConf.RPCHost
+			} else {
+				btcdHost = fmt.Sprintf("%v:%v", chainConf.RPCHost, netParams.RpcPort)
+			}
+
+			btcdUser := chainConf.RPCUser
+			btcdPass := chainConf.RPCPass
+			rpcConfig := &rpcclient.ConnConfig{
+				Host:                 btcdHost,
+				Endpoint:             "ws",
+				User:                 btcdUser,
+				Pass:                 btcdPass,
+				Certificates:         rpcCert,
+				DisableTLS:           false,
+				DisableConnectOnNew:  true,
+				DisableAutoReconnect: false,
+			}
+			cc.ChainNotifier, err = btcdnotify.New(rpcConfig)
 			if err != nil {
-				return nil, nil, err
+				return cleanUp, err
 			}
-			rpcCert, err = ioutil.ReadAll(certFile)
+
+			// Finally, we'll create an instance of the default
+			// chain view to be used within the routing layer.
+			cc.ChainView, err = chainview.NewBtcdFilteredChainView(*rpcConfig)
 			if err != nil {
-				return nil, nil, err
+				srvrLog.Errorf("unable to create chain view: "+
+					"%v", err)
+				return cleanUp, err
 			}
-			if err := certFile.Close(); err != nil {
-				return nil, nil, err
+
+			// Create a special websockets rpc client for btcd which
+			// will be used by the wallet for notifications, calls,
+			// etc.
+			chainRPC, err := bchain.NewRPCClient(netParams.Params,
+				btcdHost, btcdUser, btcdPass, rpcCert, false, 1)
+			if err != nil {
+				return cleanUp, err
 			}
+
+			walletConfig.ChainSource = chainRPC
 		}
 
-		// If the specified host for the btcd/ltcd RPC server already
-		// has a port specified, then we use that directly. Otherwise,
-		// we assume the default port according to the selected chain
-		// parameters.
-		var btcdHost string
-		if strings.Contains(homeChainConfig.RPCHost, ":") {
-			btcdHost = homeChainConfig.RPCHost
-		} else {
-			btcdHost = fmt.Sprintf("%v:%v", homeChainConfig.RPCHost,
-				activeNetParams.rpcPort)
-		}
-
-		btcdUser := homeChainConfig.RPCUser
-		btcdPass := homeChainConfig.RPCPass
-		rpcConfig := &rpcclient.ConnConfig{
-			Host:                 btcdHost,
-			Endpoint:             "ws",
-			User:                 btcdUser,
-			Pass:                 btcdPass,
-			Certificates:         rpcCert,
-			DisableTLS:           false,
-			DisableConnectOnNew:  true,
-			DisableAutoReconnect: false,
-		}
-		cc.chainNotifier, err = btcdnotify.New(rpcConfig)
+		wc, err := btcwallet.New(*walletConfig)
 		if err != nil {
-			return nil, nil, err
+			srvrLog.Errorf("unable to create wallet controller: %v", err)
+			return cleanUp, err
 		}
 
-		// Finally, we'll create an instance of the default chain view to be
-		// used within the routing layer.
-		cc.chainView, err = chainview.NewBtcdFilteredChainView(*rpcConfig)
+		cc.MsgSigner = wc
+		cc.Signer = wc
+		cc.ChainIO = wc
+
+		// Create, and start the lnwallet, which handles the core
+		// payment channel logic, and exposes control via proxy state
+		// machines.
+		walletCfg := lnwallet.Config{
+			Database:           chanDB,
+			Notifier:           cc.ChainNotifier,
+			WalletController:   wc,
+			Signer:             cc.Signer,
+			FeeEstimator:       cc.FeeEstimator,
+			ChainIO:            cc.ChainIO,
+			DefaultConstraints: defaultChannelConstraints,
+			NetParams:          *netParams.Params,
+		}
+		wallet, err := lnwallet.NewLightningWallet(walletCfg)
 		if err != nil {
-			srvrLog.Errorf("unable to create chain view: %v", err)
-			return nil, nil, err
+			srvrLog.Errorf("unable to create wallet: %v", err)
+			return nil, err
+		}
+		cc.Wallet = wallet
+
+		universe.RegisterControl(realmCode, cc)
+
+		srvrLog.Infof("Starting %v LightningWallet", realmCode)
+
+		if err := wallet.Startup(); err != nil {
+			srvrLog.Errorf("unable to start wallet: %v", err)
+			return nil, err
 		}
 
-		// Create a special websockets rpc client for btcd which will be used
-		// by the wallet for notifications, calls, etc.
-		chainRPC, err := chain.NewRPCClient(activeNetParams.Params, btcdHost,
-			btcdUser, btcdPass, rpcCert, false, 20)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		walletConfig.ChainSource = chainRPC
+		ltndLog.Infof("Opened %v LightningWallet", realmCode)
 	}
 
-	wc, err := btcwallet.New(*walletConfig)
-	if err != nil {
-		fmt.Printf("unable to create wallet controller: %v\n", err)
-		return nil, nil, err
-	}
-
-	cc.msgSigner = wc
-	cc.signer = wc
-	cc.chainIO = wc
-
-	// Create, and start the lnwallet, which handles the core payment
-	// channel logic, and exposes control via proxy state machines.
-	walletCfg := lnwallet.Config{
-		Database:           chanDB,
-		Notifier:           cc.chainNotifier,
-		WalletController:   wc,
-		Signer:             cc.signer,
-		FeeEstimator:       cc.feeEstimator,
-		ChainIO:            cc.chainIO,
-		DefaultConstraints: defaultChannelConstraints,
-		NetParams:          *activeNetParams.Params,
-	}
-	wallet, err := lnwallet.NewLightningWallet(walletCfg)
-	if err != nil {
-		fmt.Printf("unable to create wallet: %v\n", err)
-		return nil, nil, err
-	}
-	if err := wallet.Startup(); err != nil {
-		fmt.Printf("unable to start wallet: %v\n", err)
-		return nil, nil, err
-	}
-
-	ltndLog.Info("LightningWallet opened")
-
-	cc.wallet = wallet
-
-	return cc, cleanUp, nil
+	return cleanUp, nil
 }
 
 var (
@@ -328,16 +341,16 @@ var (
 
 	// chainMap is a simple index that maps a chain's genesis hash to the
 	// chainCode enum for that chain.
-	chainMap = map[chainhash.Hash]chainCode{
-		bitcoinGenesis:  bitcoinChain,
-		litecoinGenesis: litecoinChain,
+	chainMap = map[chainhash.Hash]realm.Code{
+		bitcoinGenesis:  realm.BTC,
+		litecoinGenesis: realm.LTC,
 	}
 
 	// reverseChainMap is the inverse of the chainMap above: it maps the
 	// chain enum for a chain to its genesis hash.
-	reverseChainMap = map[chainCode]chainhash.Hash{
-		bitcoinChain:  bitcoinGenesis,
-		litecoinChain: litecoinGenesis,
+	reverseChainMap = map[realm.Code]chainhash.Hash{
+		realm.BTC: bitcoinGenesis,
+		realm.LTC: litecoinGenesis,
 	}
 
 	// chainDNSSeeds is a map of a chain's hash to the set of DNS seeds
@@ -362,6 +375,7 @@ var (
 	}
 )
 
+/*
 // chainRegistry keeps track of the current chains
 type chainRegistry struct {
 	sync.RWMutex
@@ -384,8 +398,16 @@ func newChainRegistry() *chainRegistry {
 // identified by its chainCode.
 func (c *chainRegistry) RegisterChain(newChain chainCode, cc *chainControl) {
 	c.Lock()
+	defer c.Unlock()
+
 	c.activeChains[newChain] = cc
-	c.Unlock()
+}
+
+func (c *chainRegistry) RegisterParams(newChain chainCode, p *bitcoinNetParams) {
+	c.Lock()
+	defer c.Unlock()
+
+	c.netParams[newChain] = p
 }
 
 // LookupChain attempts to lookup an active chainControl instance for the
@@ -394,7 +416,16 @@ func (c *chainRegistry) LookupChain(targetChain chainCode) (*chainControl, bool)
 	c.RLock()
 	cc, ok := c.activeChains[targetChain]
 	c.RUnlock()
+
 	return cc, ok
+}
+
+func (c *chainRegistry) LookupParams(targetChain chainCode) (*bitcoinNetParams, bool) {
+	c.RLock()
+	params, ok := c.netParams[targetChain]
+	c.RUnlock()
+
+	return params, ok
 }
 
 // LookupChainByHash attempts to look up an active chainControl which
@@ -435,8 +466,8 @@ func (c *chainRegistry) ActiveChains() []chainCode {
 	c.RLock()
 	defer c.RUnlock()
 
-	chains := make([]chainCode, 0, len(c.activeChains))
-	for activeChain := range c.activeChains {
+	chains := make([]chainCode, 0, len(c.netParams))
+	for activeChain := range c.netParams {
 		chains = append(chains, activeChain)
 	}
 
@@ -450,3 +481,4 @@ func (c *chainRegistry) NumActiveChains() uint32 {
 
 	return uint32(len(c.activeChains))
 }
+*/

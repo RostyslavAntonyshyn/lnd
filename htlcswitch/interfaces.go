@@ -81,6 +81,7 @@ type ChannelLink interface {
 	// functioning.
 	Start() error
 	Stop()
+	Network() NetworkHop
 }
 
 // Peer is an interface which represents the remote lightning node inside our

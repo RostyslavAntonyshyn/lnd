@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/awalterschulze/gographviz"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
 	"github.com/lightningnetwork/lnd/lnrpc"
@@ -51,7 +52,12 @@ func printRespJSON(resp proto.Message) {
 		return
 	}
 
-	fmt.Println(jsonStr)
+	//fmt.Println(jsonStr)
+
+	var out bytes.Buffer
+	json.Indent(&out, []byte(jsonStr), "", "\t")
+	out.WriteString("\n")
+	out.WriteTo(os.Stdout)
 }
 
 var newAddressCommand = cli.Command{
@@ -62,6 +68,12 @@ var newAddressCommand = cli.Command{
 		"   - p2wkh:  Push to witness key hash\n" +
 		"   - np2wkh: Push to nested witness key hash\n" +
 		"   - p2pkh:  Push to public key hash (can't be used to fund channels)",
+	Flags: []cli.Flag{
+		cli.StringFlag{
+			Name:  "ticker",
+			Usage: "the chain to generate an address for",
+		},
+	},
 	Action: newAddress,
 }
 
@@ -69,11 +81,16 @@ func newAddress(ctx *cli.Context) error {
 	client, cleanUp := getClient(ctx)
 	defer cleanUp()
 
-	stringAddrType := ctx.Args().First()
+	args := ctx.Args()
+
+	var (
+		addrType lnrpc.NewAddressRequest_AddressType
+		ticker   string
+	)
 
 	// Map the string encoded address type, to the concrete typed address
 	// type enum. An unrecognized address type will result in an error.
-	var addrType lnrpc.NewAddressRequest_AddressType
+	stringAddrType := args.First()
 	switch stringAddrType { // TODO(roasbeef): make them ints on the cli?
 	case "p2wkh":
 		addrType = lnrpc.NewAddressRequest_WITNESS_PUBKEY_HASH
@@ -86,9 +103,20 @@ func newAddress(ctx *cli.Context) error {
 			"are: p2wkh, np2wkh, p2pkh", stringAddrType)
 	}
 
+	args = args.Tail()
+	switch {
+	case ctx.IsSet("ticker"):
+		ticker = ctx.String("ticker")
+	case args.Present():
+		ticker = args.First()
+	default:
+		return fmt.Errorf("Ticker argument missing")
+	}
+
 	ctxb := context.Background()
 	addr, err := client.NewAddress(ctxb, &lnrpc.NewAddressRequest{
-		Type: addrType,
+		Type:   addrType,
+		Ticker: ticker,
 	})
 	if err != nil {
 		return err
@@ -114,15 +142,20 @@ var sendCoinsCommand = cli.Command{
 			Name:  "amt",
 			Usage: "the number of bitcoin denominated in satoshis to send",
 		},
+		cli.StringFlag{
+			Name:  "ticker",
+			Usage: "the chain on which to send coins",
+		},
 	},
 	Action: sendCoins,
 }
 
 func sendCoins(ctx *cli.Context) error {
 	var (
-		addr string
-		amt  int64
-		err  error
+		addr   string
+		amt    int64
+		ticker string
+		err    error
 	)
 	args := ctx.Args()
 
@@ -146,12 +179,22 @@ func sendCoins(ctx *cli.Context) error {
 		amt = ctx.Int64("amt")
 	case args.Present():
 		amt, err = strconv.ParseInt(args.First(), 10, 64)
+		args = args.Tail()
 	default:
 		return fmt.Errorf("Amount argument missing")
 	}
 
 	if err != nil {
 		return fmt.Errorf("unable to decode amount: %v", err)
+	}
+
+	switch {
+	case ctx.IsSet("ticker"):
+		ticker = ctx.String("ticker")
+	case args.Present():
+		ticker = args.First()
+	default:
+		return fmt.Errorf("Ticker argument missing")
 	}
 
 	ctxb := context.Background()
@@ -161,6 +204,7 @@ func sendCoins(ctx *cli.Context) error {
 	req := &lnrpc.SendCoinsRequest{
 		Addr:   addr,
 		Amount: amt,
+		Ticker: ticker,
 	}
 	txid, err := client.SendCoins(ctxb, req)
 	if err != nil {
@@ -180,15 +224,36 @@ var sendManyCommand = cli.Command{
 		"   'send-json-string' decodes addresses and the amount to send " +
 		"respectively in the following format.\n" +
 		`   '{"ExampleAddr": NumCoinsInSatoshis, "SecondAddr": NumCoins}'`,
+	Flags: []cli.Flag{
+		cli.StringFlag{
+			Name:  "ticker",
+			Usage: "the chain on which to send coins",
+		},
+	},
 	Action: sendMany,
 }
 
 func sendMany(ctx *cli.Context) error {
-	var amountToAddr map[string]int64
+	var (
+		amountToAddr map[string]int64
+		ticker       string
+	)
 
-	jsonMap := ctx.Args().First()
+	args := ctx.Args()
+
+	jsonMap := args.First()
 	if err := json.Unmarshal([]byte(jsonMap), &amountToAddr); err != nil {
 		return err
+	}
+
+	args = args.Tail()
+	switch {
+	case ctx.IsSet("ticker"):
+		ticker = ctx.String("ticker")
+	case args.Present():
+		ticker = args.First()
+	default:
+		return fmt.Errorf("Ticker argument missing")
 	}
 
 	ctxb := context.Background()
@@ -197,6 +262,7 @@ func sendMany(ctx *cli.Context) error {
 
 	txid, err := client.SendMany(ctxb, &lnrpc.SendManyRequest{
 		AddrToAmount: amountToAddr,
+		Ticker:       ticker,
 	})
 	if err != nil {
 		return err
@@ -324,6 +390,10 @@ var openChannelCommand = cli.Command{
 			Usage: "the number of satoshis to push to the remote " +
 				"side as part of the initial commitment state",
 		},
+		cli.StringFlag{
+			Name:  "ticker",
+			Usage: "the chain to open a channel on",
+		},
 		cli.BoolFlag{
 			Name:  "block",
 			Usage: "block and wait until the channel is fully open",
@@ -394,6 +464,16 @@ func openChannel(ctx *cli.Context) error {
 		if err != nil {
 			return fmt.Errorf("unable to decode push amt: %v", err)
 		}
+		args = args.Tail()
+	}
+
+	switch {
+	case ctx.IsSet("ticker"):
+		req.Ticker = ctx.String("ticker")
+	case args.Present():
+		req.Ticker = args.First()
+	default:
+		return fmt.Errorf("Ticker argument missing")
 	}
 
 	stream, err := client.OpenChannel(ctxb, req)
@@ -679,6 +759,10 @@ var walletBalanceCommand = cli.Command{
 			Usage: "if only witness outputs should be considered when " +
 				"calculating the wallet's balance",
 		},
+		cli.StringFlag{
+			Name:  "ticker",
+			Usage: "the chain of the wallet to query",
+		},
 	},
 	Action: walletBalance,
 }
@@ -688,8 +772,21 @@ func walletBalance(ctx *cli.Context) error {
 	client, cleanUp := getClient(ctx)
 	defer cleanUp()
 
+	args := ctx.Args()
+
+	var ticker string
+	switch {
+	case ctx.IsSet("ticker"):
+		ticker = ctx.String("ticker")
+	case args.Present():
+		ticker = args.First()
+	default:
+		return fmt.Errorf("Ticker argument missing")
+	}
+
 	req := &lnrpc.WalletBalanceRequest{
 		WitnessOnly: ctx.Bool("witness_only"),
+		Ticker:      ticker,
 	}
 	resp, err := client.WalletBalance(ctxb, req)
 	if err != nil {
@@ -759,6 +856,10 @@ var pendingChannelsCommand = cli.Command{
 			Usage: "display the status of channels in the " +
 				"process of being opened or closed",
 		},
+		cli.StringFlag{
+			Name:  "ticker",
+			Usage: "list pending channels for a particular chain",
+		},
 	},
 	Action: pendingChannels,
 }
@@ -768,7 +869,21 @@ func pendingChannels(ctx *cli.Context) error {
 	client, cleanUp := getClient(ctx)
 	defer cleanUp()
 
-	req := &lnrpc.PendingChannelRequest{}
+	args := ctx.Args()
+
+	var ticker string
+	switch {
+	case ctx.IsSet("ticker"):
+		ticker = ctx.String("ticker")
+	case args.Present():
+		ticker = args.First()
+	default:
+		return fmt.Errorf("Ticker argument missing")
+	}
+
+	req := &lnrpc.PendingChannelRequest{
+		Ticker: ticker,
+	}
 	resp, err := client.PendingChannels(ctxb, req)
 	if err != nil {
 		return err
@@ -989,6 +1104,112 @@ func payInvoice(ctx *cli.Context) error {
 	return sendPaymentRequest(ctx, req)
 }
 
+var sendToRouteCommand = cli.Command{
+	Name:  "sendtoroute",
+	Usage: "send a payment over a predefined route",
+	ArgsUsage: "(lncli queryroutes --dest=<dest> --amt=<amt> " +
+		"| lncli sendtoroute --payment_hash=<payment_hash>)",
+	Flags: []cli.Flag{
+		cli.StringFlag{
+			Name:  "payment_hash, ph",
+			Usage: "the hash to use within the payment's HTLC",
+		},
+		cli.BoolFlag{
+			Name:  "debug_send",
+			Usage: "use the debug rHash when sending the HTLC",
+		},
+	},
+	Action: sendToRoute,
+}
+
+func sendToRoute(ctx *cli.Context) error {
+	client, cleanUp := getClient(ctx)
+	defer cleanUp()
+
+	// Show command help if no arguments provieded
+	if ctx.NArg() == 0 && ctx.NumFlags() == 0 {
+		cli.ShowCommandHelp(ctx, "sendtoroute")
+		return nil
+	}
+
+	args := ctx.Args()
+
+	b, err := ioutil.ReadAll(os.Stdin)
+	if err != nil {
+		return err
+	}
+	if len(b) == 0 {
+		return fmt.Errorf("queryroutes output is empty")
+	}
+
+	qroutes := &lnrpc.QueryRoutesResponse{}
+	err = jsonpb.UnmarshalString(string(b), qroutes)
+	if err != nil {
+		return fmt.Errorf("unable to unmarshal json string from "+
+			"incoming array of routes: %v", err)
+	}
+
+	spew.Sdump(qroutes)
+
+	var rHash []byte
+	if ctx.Bool("debug_send") &&
+		(ctx.IsSet("payment_hash") || args.Present()) {
+		return fmt.Errorf("do not provide a payment hash with debug " +
+			"send")
+	} else if !ctx.Bool("debug_send") {
+		switch {
+		case ctx.IsSet("payment_hash"):
+			rHash, err = hex.DecodeString(ctx.String("payment_hash"))
+		case args.Present():
+			rHash, err = hex.DecodeString(args.First())
+		default:
+			return fmt.Errorf("payment hash argument missing")
+		}
+
+		if err != nil {
+			return err
+		}
+
+		if len(rHash) != 32 {
+			return fmt.Errorf("payment hash must be exactly 32 "+
+				"bytes, is instead %d", len(rHash))
+		}
+	}
+
+	req := &lnrpc.SendToRouteRequest{
+		PaymentHash: rHash,
+		Routes:      qroutes.Routes,
+	}
+
+	paymentStream, err := client.SendToRoute(context.Background())
+	if err != nil {
+		return err
+	}
+
+	if err := paymentStream.Send(req); err != nil {
+		return err
+	}
+
+	resp, err := paymentStream.Recv()
+	if err != nil {
+		return err
+	}
+
+	paymentStream.CloseSend()
+
+	printJSON(struct {
+		E string       `json:"payment_error"`
+		P string       `json:"payment_preimage"`
+		R *lnrpc.Route `json:"payment_route"`
+	}{
+		E: resp.PaymentError,
+		P: hex.EncodeToString(resp.PaymentPreimage),
+		R: resp.PaymentRoute,
+	})
+
+	return nil
+}
+
 var addInvoiceCommand = cli.Command{
 	Name:  "addinvoice",
 	Usage: "add a new invoice.",
@@ -1036,6 +1257,10 @@ var addInvoiceCommand = cli.Command{
 				"specified an expiry of 3600 seconds (1 hour) " +
 				"is implied.",
 		},
+		cli.StringFlag{
+			Name:  "ticker",
+			Usage: "the chain to receive the payment on",
+		},
 	},
 	Action: addInvoice,
 }
@@ -1046,6 +1271,7 @@ func addInvoice(ctx *cli.Context) error {
 		descHash []byte
 		receipt  []byte
 		value    int64
+		ticker   string
 		err      error
 	)
 
@@ -1072,6 +1298,16 @@ func addInvoice(ctx *cli.Context) error {
 		preimage, err = hex.DecodeString(ctx.String("preimage"))
 	case args.Present():
 		preimage, err = hex.DecodeString(args.First())
+		args = args.Tail()
+	}
+
+	switch {
+	case ctx.IsSet("ticker"):
+		ticker = ctx.String("ticker")
+	case args.Present():
+		ticker = args.First()
+	default:
+		return fmt.Errorf("Ticker argument missing")
 	}
 
 	if err != nil {
@@ -1096,6 +1332,7 @@ func addInvoice(ctx *cli.Context) error {
 		DescriptionHash: descHash,
 		FallbackAddr:    ctx.String("fallback_addr"),
 		Expiry:          ctx.Int64("expiry"),
+		Ticker:          ticker,
 	}
 
 	resp, err := client.AddInvoice(context.Background(), invoice)
@@ -1564,6 +1801,107 @@ func queryRoutes(ctx *cli.Context) error {
 	return nil
 }
 
+var querySwapRoutesCommand = cli.Command{
+	Name:        "queryswaproutes",
+	Usage:       "Query a swap route to a destination.",
+	Description: "Queries the channel router for a potential path to the destination that has sufficient flow for the amount including fees",
+	ArgsUsage:   "dest in_amt in_ticker out_ticker",
+	Flags: []cli.Flag{
+		cli.StringFlag{
+			Name: "dest",
+			Usage: "the 33-byte hex-encoded public key for the payment " +
+				"destination",
+		},
+		cli.Int64Flag{
+			Name:  "in_amt",
+			Usage: "the amount to receive in in_ticker satoshis",
+		},
+		cli.StringFlag{
+			Name:  "in_ticker",
+			Usage: "the chain on which to receive in_amt satoshis",
+		},
+		cli.StringFlag{
+			Name:  "out_ticker",
+			Usage: "the chain on which to receive the swapped currency",
+		},
+	},
+	Action: querySwapRoutes,
+}
+
+func querySwapRoutes(ctx *cli.Context) error {
+	ctxb := context.Background()
+	client, cleanUp := getClient(ctx)
+	defer cleanUp()
+
+	var (
+		dest      string
+		inAmt     int64
+		inTicker  string
+		outTicker string
+		err       error
+	)
+
+	args := ctx.Args()
+
+	switch {
+	case ctx.IsSet("dest"):
+		dest = ctx.String("dest")
+	case args.Present():
+		dest = args.First()
+		args = args.Tail()
+	default:
+		return fmt.Errorf("dest argument missing")
+	}
+
+	switch {
+	case ctx.IsSet("in_amt"):
+		inAmt = ctx.Int64("in_amt")
+	case args.Present():
+		inAmt, err = strconv.ParseInt(args.First(), 10, 64)
+		if err != nil {
+			return fmt.Errorf("unable to decode amt argument: %v", err)
+		}
+		args = args.Tail()
+	default:
+		return fmt.Errorf("in_amt argument missing")
+	}
+
+	switch {
+	case ctx.IsSet("in_ticker"):
+		inTicker = ctx.String("in_ticker")
+	case args.Present():
+		inTicker = args.First()
+		args = args.Tail()
+	default:
+		return fmt.Errorf("in_ticker argument missing")
+	}
+
+	switch {
+	case ctx.IsSet("out_ticker"):
+		outTicker = ctx.String("out_ticker")
+	case args.Present():
+		outTicker = args.First()
+		args = args.Tail()
+	default:
+		return fmt.Errorf("out_ticker argument missing")
+	}
+
+	req := &lnrpc.QuerySwapRoutesRequest{
+		PubKey:    dest,
+		InAmt:     inAmt,
+		InTicker:  inTicker,
+		OutTicker: outTicker,
+	}
+
+	route, err := client.QuerySwapRoutes(ctxb, req)
+	if err != nil {
+		return err
+	}
+
+	printRespJSON(route)
+	return nil
+}
+
 var getNetworkInfoCommand = cli.Command{
 	Name:  "getnetworkinfo",
 	Usage: "getnetworkinfo",
@@ -1668,7 +2006,13 @@ var listChainTxnsCommand = cli.Command{
 	Name:        "listchaintxns",
 	Usage:       "List transactions from the wallet.",
 	Description: "List all transactions an address of the wallet was involved in.",
-	Action:      listChainTxns,
+	Flags: []cli.Flag{
+		cli.StringFlag{
+			Name:  "ticker",
+			Usage: "the chain to enumerate on-chain transactions",
+		},
+	},
+	Action: listChainTxns,
 }
 
 func listChainTxns(ctx *cli.Context) error {
@@ -1676,8 +2020,23 @@ func listChainTxns(ctx *cli.Context) error {
 	client, cleanUp := getClient(ctx)
 	defer cleanUp()
 
-	resp, err := client.GetTransactions(ctxb, &lnrpc.GetTransactionsRequest{})
+	args := ctx.Args()
 
+	var ticker string
+	switch {
+	case ctx.IsSet("ticker"):
+		ticker = ctx.String("ticker")
+	case args.Present():
+		ticker = args.First()
+	default:
+		return fmt.Errorf("Ticker argument missing")
+	}
+
+	req := &lnrpc.GetTransactionsRequest{
+		Ticker: ticker,
+	}
+
+	resp, err := client.GetTransactions(ctxb, req)
 	if err != nil {
 		return err
 	}
