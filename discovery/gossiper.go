@@ -280,13 +280,14 @@ func (d *AuthenticatedGossiper) SynchronizeNode(syncPeer lnpeer.Peer) error {
 			return nil, err
 		}
 		return &lnwire.NodeAnnouncement{
-			Signature: wireSig,
-			Timestamp: uint32(n.LastUpdate.Unix()),
-			Addresses: n.Addresses,
-			NodeID:    n.PubKeyBytes,
-			Features:  n.Features.RawFeatureVector,
-			RGBColor:  n.Color,
-			Alias:     alias,
+			Signature:       wireSig,
+			Timestamp:       uint32(n.LastUpdate.Unix()),
+			Addresses:       n.Addresses,
+			NodeID:          n.PubKeyBytes,
+			Features:        n.Features.RawFeatureVector,
+			RGBColor:        n.Color,
+			Alias:           alias,
+			ExtraOpaqueData: n.ExtraOpaqueData,
 		}, nil
 	}
 
@@ -1617,6 +1618,7 @@ func (d *AuthenticatedGossiper) processNetworkAnnouncement(
 			AuthSigBytes:         msg.Signature.ToSignatureBytes(),
 			Features:             features,
 			Color:                msg.RGBColor,
+			ExtraOpaqueData:      msg.ExtraOpaqueData,
 		}
 
 		if err := d.cfg.Router.AddNode(node); err != nil {
@@ -1739,6 +1741,7 @@ func (d *AuthenticatedGossiper) processNetworkAnnouncement(
 			BitcoinKey2Bytes: msg.BitcoinKey2,
 			AuthProof:        proof,
 			Features:         featureBuf.Bytes(),
+			ExtraOpaqueData:  msg.ExtraOpaqueData,
 		}
 
 		// We will add the edge to the channel router. If the nodes
@@ -2008,6 +2011,7 @@ func (d *AuthenticatedGossiper) processNetworkAnnouncement(
 			MinHTLC:                   msg.HtlcMinimumMsat,
 			FeeBaseMSat:               lnwire.MilliSatoshi(msg.BaseFee),
 			FeeProportionalMillionths: lnwire.MilliSatoshi(msg.FeeRate),
+			ExtraOpaqueData:           msg.ExtraOpaqueData,
 		}
 
 		if err := d.cfg.Router.UpdateEdge(update); err != nil {
@@ -2476,6 +2480,7 @@ func (d *AuthenticatedGossiper) updateChannel(info *channeldb.ChannelEdgeInfo,
 		HtlcMinimumMsat: edge.MinHTLC,
 		BaseFee:         uint32(edge.FeeBaseMSat),
 		FeeRate:         uint32(edge.FeeProportionalMillionths),
+		ExtraOpaqueData: edge.ExtraOpaqueData,
 	}
 	chanUpdate.Signature, err = lnwire.NewSigFromRawSignature(edge.SigBytes)
 	if err != nil {
@@ -2517,13 +2522,14 @@ func (d *AuthenticatedGossiper) updateChannel(info *channeldb.ChannelEdgeInfo,
 	if info.AuthProof != nil {
 		chanID := lnwire.NewShortChanIDFromInt(info.ChannelID)
 		chanAnn = &lnwire.ChannelAnnouncement{
-			ShortChannelID: chanID,
-			NodeID1:        info.NodeKey1Bytes,
-			NodeID2:        info.NodeKey2Bytes,
-			ChainHash:      info.ChainHash,
-			BitcoinKey1:    info.BitcoinKey1Bytes,
-			Features:       lnwire.NewRawFeatureVector(),
-			BitcoinKey2:    info.BitcoinKey2Bytes,
+			ShortChannelID:  chanID,
+			NodeID1:         info.NodeKey1Bytes,
+			NodeID2:         info.NodeKey2Bytes,
+			ChainHash:       info.ChainHash,
+			BitcoinKey1:     info.BitcoinKey1Bytes,
+			Features:        lnwire.NewRawFeatureVector(),
+			BitcoinKey2:     info.BitcoinKey2Bytes,
+			ExtraOpaqueData: edge.ExtraOpaqueData,
 		}
 		chanAnn.NodeSig1, err = lnwire.NewSigFromRawSignature(
 			info.AuthProof.NodeSig1Bytes,
