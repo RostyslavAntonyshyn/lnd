@@ -2873,7 +2873,10 @@ func deserializeLightningNode(r io.Reader) (LightningNode, error) {
 	node.ExtraOpaqueData, err = wire.ReadVarBytes(
 		r, 0, MaxAllowedExtraOpaqueBytes, "blob",
 	)
-	if err != nil && err != io.ErrUnexpectedEOF {
+	switch {
+	case err == io.ErrUnexpectedEOF:
+	case err == io.EOF:
+	case err != nil:
 		return LightningNode{}, err
 	}
 
@@ -3025,7 +3028,10 @@ func deserializeChanEdgeInfo(r io.Reader) (ChannelEdgeInfo, error) {
 	edgeInfo.ExtraOpaqueData, err = wire.ReadVarBytes(
 		r, 0, MaxAllowedExtraOpaqueBytes, "blob",
 	)
-	if err != nil && err != io.ErrUnexpectedEOF {
+	switch {
+	case err == io.ErrUnexpectedEOF:
+	case err == io.EOF:
+	case err != nil:
 		return ChannelEdgeInfo{}, err
 	}
 
@@ -3273,7 +3279,10 @@ func deserializeChanEdgePolicy(r io.Reader,
 	edge.ExtraOpaqueData, err = wire.ReadVarBytes(
 		r, 0, MaxAllowedExtraOpaqueBytes, "blob",
 	)
-	if err != nil && err != io.ErrUnexpectedEOF {
+	switch {
+	case err == io.ErrUnexpectedEOF:
+	case err == io.EOF:
+	case err != nil:
 		return nil, err
 	}
 
