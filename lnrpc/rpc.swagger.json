@@ -3001,6 +3001,14 @@
         }
       }
     },
+    "lnrpcResolveResponse": {
+      "type": "object",
+      "properties": {
+        "preimage": {
+          "type": "string"
+        } 
+      }
+    },
     "lnrpcRestoreBackupResponse": {
       "type": "object"
     },
