@@ -150,9 +150,11 @@ scratch: dep build
 
 check: unit itest
 
-itest: btcd build
+itest-only: 
 	@$(call print, "Running integration tests.")
 	$(ITEST)
+
+itest: btcd build itest-only
 
 unit: btcd
 	@$(call print, "Running unit tests.")
@@ -243,6 +245,7 @@ clean:
 	install \
 	scratch \
 	check \
+	itest-only \
 	itest \
 	unit \
 	unit-cover \
