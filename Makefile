@@ -94,7 +94,7 @@ $(GOVERALLS_BIN):
 
 $(LINT_BIN):
 	@$(call print, "Fetching gometalinter.v2")
-	go get -u $(LINT_PKG)
+	GO111MODULE=off go get -u $(LINT_PKG)
 
 $(BTCD_DIR):
 	@$(call print, "Fetching btcd.")
@@ -177,7 +177,7 @@ fmt:
 
 lint: $(LINT_BIN)
 	@$(call print, "Linting source.")
-	$(LINT_BIN) --install 1> /dev/null
+	GO111MODULE=off $(LINT_BIN) --install 1> /dev/null
 	test -z "$$($(LINT))"
 
 list:
