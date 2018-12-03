@@ -54,7 +54,7 @@ const (
 
 	// btcToLtcConversionRate is a fixed ratio used in order to scale up
 	// payments when running on the Litecoin chain.
-	btcToLtcConversionRate = 60
+	btcToLtcConversionRate = 90
 )
 
 // defaultBtcChannelConstraints is the default set of channel constraints that are
