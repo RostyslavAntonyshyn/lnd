@@ -41,7 +41,7 @@ import (
 const (
 	// maxBtcPaymentMSat is the maximum allowed Bitcoin payment currently
 	// permitted as defined in BOLT-0002.
-	maxBtcPaymentMSat = lnwire.MilliSatoshi(math.MaxUint32) * 2^(32-24)
+	maxBtcPaymentMSat = lnwire.MilliSatoshi(math.MaxUint32) * 64
 
 	// maxLtcPaymentMSat is the maximum allowed Litecoin payment currently
 	// permitted.
