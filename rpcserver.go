@@ -45,7 +45,7 @@ const (
 
 	// maxLtcPaymentMSat is the maximum allowed Litecoin payment currently
 	// permitted.
-	maxLtcPaymentMSat = lnwire.MilliSatoshi(math.MaxUint32) *
+	maxLtcPaymentMSat = lnwire.MilliSatoshi(math.MaxUint32) * 64 *
 		btcToLtcConversionRate
 )
 
