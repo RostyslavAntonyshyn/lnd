@@ -3384,7 +3384,7 @@ func (r *rpcServer) AddInvoice(ctx context.Context,
 	)
 
 	// With all sanity checks passed, write the invoice to the database.
-	addIndex, err := r.server.invoices.AddInvoice(newInvoice)
+	addIndex, err := r.server.invoices.AddInvoice(newInvoice, rHash)
 	if err != nil {
 		return nil, err
 	}
