@@ -5520,7 +5520,6 @@ func TestNewBreachRetributionSkipsDustHtlcs(t *testing.T) {
 
 	// At this point, we'll capture the current state number, as well as
 	// the current commitment.
-	revokedCommit := bobChannel.channelState.LocalCommitment.CommitTx
 	revokedStateNum := aliceChannel.channelState.LocalCommitment.CommitHeight
 
 	// We'll now have Bob settle those HTLC's to Alice and then advance
@@ -5542,7 +5541,7 @@ func TestNewBreachRetributionSkipsDustHtlcs(t *testing.T) {
 	// At this point, we'll now simulate a contract breach by Bob using the
 	// NewBreachRetribution method.
 	breachRet, err := NewBreachRetribution(
-		aliceChannel.channelState, revokedStateNum, revokedCommit, 100,
+		aliceChannel.channelState, revokedStateNum, 100,
 	)
 	if err != nil {
 		t.Fatalf("unable to create breach retribution: %v", err)
