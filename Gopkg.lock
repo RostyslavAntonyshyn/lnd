@@ -290,7 +290,7 @@
 
 [[projects]]
   digest = "1:3402f61a37575d808e4499dbfda1ab756d570c66cdfed492b84a936bbb909533"
-  name = "github.com/ltcsuite/ltcd"
+  name = "github.com/offerm/ltcd"
   packages = [
     "chaincfg",
     "chaincfg/chainhash",
