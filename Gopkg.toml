@@ -52,6 +52,7 @@
 
 [[constraint]]
   name = "github.com/ltcsuite/ltcd"
+  source = "github.com/ltcsuite-archive/ltcd"
   revision = "cdab10132e8c6e4a3ffd112dba54791946d28906"
 
 [[constraint]]
