@@ -56,6 +56,10 @@ const (
 	// btcToLtcConversionRate is a fixed ratio used in order to scale up
 	// payments when running on the Litecoin chain.
 	btcToLtcConversionRate = 60
+
+        // btcToXsnConversionRate is a fixed ratio used in order to scale up
+        // payments when running on the Xsncoin chain.
+        btcToXsnConversionRate = 1000000
 )
 
 // defaultBtcChannelConstraints is the default set of channel constraints that are
@@ -84,6 +88,9 @@ const (
 
 	// litecoinChain is Litecoin's testnet chain.
 	litecoinChain
+
+	// xsncoinChain is Stakenet's testnet chain.
+	xsncoinChain
 )
 
 // String returns a string representation of the target chainCode.
@@ -93,6 +100,8 @@ func (c chainCode) String() string {
 		return "bitcoin"
 	case litecoinChain:
 		return "litecoin"
+	case xsncoinChain:
+		return "xsncoin"
 	default:
 		return "kekcoin"
 	}
@@ -143,6 +152,12 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 	ltndLog.Infof("Primary chain is set to: %v",
 		registeredChains.PrimaryChain())
 
+	if registeredChains.PrimaryChain() == xsncoinChain {
+		homeChainConfig = cfg.Xsncoin
+	}
+	ltndLog.Infof("Primary chain is set to: %v",
+		registeredChains.PrimaryChain())
+
 	cc := &chainControl{}
 
 	switch registeredChains.PrimaryChain() {
@@ -164,8 +179,18 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 			TimeLockDelta: cfg.Litecoin.TimeLockDelta,
 		}
 		cc.feeEstimator = lnwallet.NewStaticFeeEstimator(
-			defaultLitecoinStaticFeePerKW, 0,
-		)
+                        defaultLitecoinStaticFeePerKW, 0,
+                )
+	case xsncoinChain:
+               cc.routingPolicy = htlcswitch.ForwardingPolicy{
+                       MinHTLC:       cfg.Xsncoin.MinHTLC,
+                       BaseFee:       cfg.Xsncoin.BaseFee,
+                       FeeRate:       cfg.Xsncoin.FeeRate,
+                       TimeLockDelta: cfg.Xsncoin.TimeLockDelta,
+               }
+               cc.feeEstimator = lnwallet.NewStaticFeeEstimator(
+                       defaultBitcoinStaticFeePerKW, 0,
+               )
 	default:
 		return nil, fmt.Errorf("Default routing policy for chain %v is "+
 			"unknown", registeredChains.PrimaryChain())
@@ -227,14 +252,15 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 		walletConfig.ChainSource = chain.NewNeutrinoClient(
 			activeNetParams.Params, neutrinoCS,
 		)
-
-	case "bitcoind", "litecoind":
+	case "bitcoind", "litecoind", "xsnd":
 		var bitcoindMode *bitcoindConfig
 		switch {
 		case cfg.Bitcoin.Active:
 			bitcoindMode = cfg.BitcoindMode
 		case cfg.Litecoin.Active:
 			bitcoindMode = cfg.LitecoindMode
+		case cfg.Xsncoin.Active:
+			bitcoindMode = cfg.XsndMode
 		}
 		// Otherwise, we'll be speaking directly via RPC and ZMQ to a
 		// bitcoind node. If the specified host for the btcd/ltcd RPC
@@ -337,6 +363,23 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 			if err := cc.feeEstimator.Start(); err != nil {
 				return nil, err
 			}
+		} else if cfg.Xsncoin.Active && !cfg.Xsncoin.RegTest {
+			ltndLog.Infof("Initializing xsnd backed fee estimator")
+
+			// Finally, we'll re-initialize the fee estimator, as
+			// if we're using xsnd as a backend, then we can
+			// use live fee estimates, rather than a statically
+			// coded value.
+			fallBackFeeRate := lnwallet.SatPerKVByte(25 * 1000)
+			cc.feeEstimator, err = lnwallet.NewBitcoindFeeEstimator(
+				*rpcConfig, fallBackFeeRate.FeePerKWeight(),
+			)
+			if err != nil {
+				return nil, err
+			}
+			if err := cc.feeEstimator.Start(); err != nil {
+				return nil, err
+			}
 		}
 	case "btcd", "ltcd":
 		// Otherwise, we'll be speaking directly via RPC to a node.
@@ -371,7 +414,6 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 				return nil, err
 			}
 		}
-
 		// If the specified host for the btcd/ltcd RPC server already
 		// has a port specified, then we use that directly. Otherwise,
 		// we assume the default port according to the selected chain
@@ -383,7 +425,6 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 			btcdHost = fmt.Sprintf("%v:%v", btcdMode.RPCHost,
 				activeNetParams.rpcPort)
 		}
-
 		btcdUser := btcdMode.RPCUser
 		btcdPass := btcdMode.RPCPass
 		rpcConfig := &rpcclient.ConnConfig{
@@ -402,7 +443,6 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 		if err != nil {
 			return nil, err
 		}
-
 		// Finally, we'll create an instance of the default chain view to be
 		// used within the routing layer.
 		cc.chainView, err = chainview.NewBtcdFilteredChainView(*rpcConfig)
@@ -418,7 +458,6 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 		if err != nil {
 			return nil, err
 		}
-
 		walletConfig.ChainSource = chainRPC
 
 		// If we're not in simnet or regtest mode, then we'll attempt
@@ -535,6 +574,13 @@ var (
 		0x59, 0x40, 0xfd, 0x1f, 0xe3, 0x65, 0xa7, 0x12,
 	})
 
+	xsncoinTestnetGenesis = chainhash.Hash([chainhash.HashSize]byte{
+        	0x63, 0x07, 0xe9, 0x9e, 0x74, 0xbb, 0x85, 0x9a,
+	        0x33, 0xdc, 0xf0, 0x5a, 0xd6, 0xc6, 0x6e, 0x4b,
+        	0xfe, 0x71, 0xa5, 0xc5, 0x02, 0xce, 0xfd, 0x41,
+        	0x4e, 0xcd, 0x31, 0x4b, 0x25, 0x05, 0x00, 0x00,
+	})
+
 	// chainMap is a simple index that maps a chain's genesis hash to the
 	// chainCode enum for that chain.
 	chainMap = map[chainhash.Hash]chainCode{
@@ -557,7 +603,7 @@ var (
 	//
 	// TODO(roasbeef): extend and collapse these and chainparams.go into
 	// struct like chaincfg.Params
-	chainDNSSeeds = map[chainhash.Hash][][2]string{
+	chainDNSSeeds = map[chainhash.Hash][][3]string{
 		bitcoinMainnetGenesis: {
 			{
 				"nodes.lightning.directory",

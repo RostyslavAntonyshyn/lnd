@@ -857,6 +857,11 @@ func newServer(listenAddrs []net.Addr, chanDB *channeldb.DB, cc *chainControl,
 		minRemoteDelay = minLtcRemoteDelay
 		maxRemoteDelay = maxLtcRemoteDelay
 	}
+	if primaryChain == xsncoinChain {
+		chainCfg = cfg.Xsncoin
+		minRemoteDelay = minBtcRemoteDelay
+		maxRemoteDelay = maxBtcRemoteDelay
+	}
 
 	var chanIDSeed [32]byte
 	if _, err := rand.Read(chanIDSeed[:]); err != nil {

@@ -113,16 +113,16 @@ func lndMain() error {
 
 	var network string
 	switch {
-	case cfg.Bitcoin.TestNet3 || cfg.Litecoin.TestNet3:
+	case cfg.Bitcoin.TestNet3 || cfg.Litecoin.TestNet3 || cfg.Xsncoin.TestNet3:
 		network = "testnet"
 
-	case cfg.Bitcoin.MainNet || cfg.Litecoin.MainNet:
+	case cfg.Bitcoin.MainNet || cfg.Litecoin.MainNet ||  cfg.Xsncoin.MainNet:
 		network = "mainnet"
 
 	case cfg.Bitcoin.SimNet:
 		network = "simnet"
 
-	case cfg.Bitcoin.RegTest:
+	case cfg.Bitcoin.RegTest ||  cfg.Xsncoin.RegTest:
 		network = "regtest"
 	}
 
@@ -281,8 +281,7 @@ func lndMain() error {
 	activeChainControl, err := newChainControlFromConfig(
 		cfg, chanDB, privateWalletPw, publicWalletPw,
 		walletInitParams.Birthday, walletInitParams.RecoveryWindow,
-		walletInitParams.Wallet, neutrinoCS,
-	)
+		walletInitParams.Wallet, neutrinoCS,	)
 	if err != nil {
 		fmt.Printf("unable to create chain control: %v\n", err)
 		return err
@@ -730,6 +729,10 @@ func waitForWalletPassword(grpcEndpoints, restEndpoints []net.Addr,
 		chainConfig = cfg.Litecoin
 	}
 
+	if registeredChains.PrimaryChain() == xsncoinChain {
+		chainConfig = cfg.Xsncoin
+	}
+
 	// The macaroon files are passed to the wallet unlocker since they are
 	// also encrypted with the wallet's password. These files will be
 	// deleted within it and recreated when successfully changing the
@@ -845,6 +848,7 @@ func waitForWalletPassword(grpcEndpoints, restEndpoints []net.Addr,
 		netDir := btcwallet.NetworkDir(
 			chainConfig.ChainDir, activeNetParams.Params,
 		)
+
 		loader := wallet.NewLoader(
 			activeNetParams.Params, netDir, uint32(recoveryWindow),
 		)

@@ -67,6 +67,11 @@ const (
 	// currently accepted on the Litecoin chain within the Lightning
 	// Protocol.
 	maxLtcFundingAmount = maxBtcFundingAmount * btcToLtcConversionRate
+
+        // maxXsbFundingAmount is a soft-limit of the maximum channel size
+        // currently accepted on the Xsncoin chain within the Lightning
+        // Protocol.
+        maxXsnFundingAmount = maxBtcFundingAmount * btcToXsnConversionRate
 )
 
 var (

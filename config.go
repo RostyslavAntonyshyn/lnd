@@ -109,7 +109,7 @@ type chainConfig struct {
 	Active   bool   `long:"active" description:"If the chain should be active or not."`
 	ChainDir string `long:"chaindir" description:"The directory to store the chain's data within."`
 
-	Node string `long:"node" description:"The blockchain interface to use." choice:"btcd" choice:"bitcoind" choice:"neutrino" choice:"ltcd" choice:"litecoind"`
+	Node string `long:"node" description:"The blockchain interface to use." choice:"xsnd" choice:"btcd" choice:"bitcoind" choice:"neutrino" choice:"ltcd" choice:"litecoind"`
 
 	MainNet  bool `long:"mainnet" description:"Use the main network"`
 	TestNet3 bool `long:"testnet" description:"Use the test network"`
@@ -233,6 +233,9 @@ type config struct {
 	LtcdMode      *btcdConfig     `group:"ltcd" namespace:"ltcd"`
 	LitecoindMode *bitcoindConfig `group:"litecoind" namespace:"litecoind"`
 
+	Xsncoin      *chainConfig    `group:"Xsncoin" namespace:"xsncoin"`
+	XsndMode 	 *bitcoindConfig `group:"xsnd" namespace:"xsnd"`
+
 	Autopilot *autoPilotConfig `group:"Autopilot" namespace:"autopilot"`
 
 	Tor *torConfig `group:"Tor" namespace:"tor"`
@@ -321,6 +324,18 @@ func loadConfig() (*config, error) {
 			Dir:     defaultLitecoindDir,
 			RPCHost: defaultRPCHost,
 		},
+		Xsncoin: &chainConfig {
+			MinHTLC:       defaultBitcoinMinHTLCMSat,
+			BaseFee:       defaultBitcoinBaseFeeMSat,
+			FeeRate:       defaultBitcoinFeeRate,
+			TimeLockDelta: defaultBitcoinTimeLockDelta,
+			Node:          "xsnd",
+		},
+		XsndMode: &bitcoindConfig {
+			Dir:     defaultBitcoindDir,
+			RPCHost: defaultRPCHost,
+		},
+
 		MaxPendingChannels: defaultMaxPendingChannels,
 		NoSeedBackup:       defaultNoSeedBackup,
 		MinBackoff:         defaultMinBackoff,
@@ -456,6 +471,7 @@ func loadConfig() (*config, error) {
 	cfg.LtcdMode.Dir = cleanAndExpandPath(cfg.LtcdMode.Dir)
 	cfg.BitcoindMode.Dir = cleanAndExpandPath(cfg.BitcoindMode.Dir)
 	cfg.LitecoindMode.Dir = cleanAndExpandPath(cfg.LitecoindMode.Dir)
+	cfg.XsndMode.Dir = cleanAndExpandPath(cfg.XsndMode.Dir)
 	cfg.Tor.PrivateKeyPath = cleanAndExpandPath(cfg.Tor.PrivateKeyPath)
 
 	// Ensure that the user didn't attempt to specify negative values for
@@ -586,7 +602,7 @@ func loadConfig() (*config, error) {
 
 	// Either Bitcoin must be active, or Litecoin must be active.
 	// Otherwise, we don't know which chain we're on.
-	case !cfg.Bitcoin.Active && !cfg.Litecoin.Active:
+	case !cfg.Bitcoin.Active && !cfg.Litecoin.Active && !cfg.Xsncoin.Active:
 		return nil, fmt.Errorf("%s: either bitcoin.active or "+
 			"litecoin.active must be set to 1 (true)", funcName)
 
@@ -783,6 +799,104 @@ func loadConfig() (*config, error) {
 		// Finally we'll register the bitcoin chain as our current
 		// primary chain.
 		registeredChains.RegisterPrimaryChain(bitcoinChain)
+
+	case cfg.Xsncoin.Active:
+		// Multiple networks can't be selected simultaneously.  Count
+		// number of network flags passed; assign active network params
+		// while we're at it.
+		numNets := 0
+		var xsnParams xsncoinNetParams
+		if cfg.Xsncoin.MainNet {
+			numNets++
+			xsnParams = xsnMainNetParams
+		}
+		if cfg.Xsncoin.TestNet3 {
+			numNets++
+			xsnParams = xsnTestNetParams
+		}
+		if cfg.Xsncoin.RegTest {
+			numNets++
+			xsnParams = xsnRegTestNetParams
+		}
+
+		if numNets > 1 {
+			str := "%s: The mainnet, testnet, regtest, and " +
+				"simnet params can't be used together -- " +
+				"choose one of the four"
+			err := fmt.Errorf(str, funcName)
+			return nil, err
+		}
+
+		// The target network must be provided, otherwise, we won't
+		// know how to initialize the daemon.
+		if numNets == 0 {
+			str := "%s: either --bitcoin.mainnet, or " +
+				"bitcoin.testnet, bitcoin.simnet, or bitcoin.regtest " +
+				"must be specified"
+			err := fmt.Errorf(str, funcName)
+			return nil, err
+		}
+
+		// The litecoin chain is the current active chain. However
+		// throughout the codebase we required chaincfg.Params. So as a
+		// temporary hack, we'll mutate the default net params for
+		// bitcoin with the litecoin specific information.
+		applyStakenetParams(&activeNetParams, &xsnParams)
+
+		if cfg.Xsncoin.Node == "neutrino" && cfg.Xsncoin.MainNet {
+			str := "%s: neutrino isn't yet supported for " +
+				"bitcoin's mainnet"
+			err := fmt.Errorf(str, funcName)
+			return nil, err
+		}
+
+		if cfg.Xsncoin.TimeLockDelta < minTimeLockDelta {
+			return nil, fmt.Errorf("timelockdelta must be at least %v",
+				minTimeLockDelta)
+		}
+
+		switch cfg.Xsncoin.Node {
+		case "btcd":
+			err := parseRPCParams(
+				cfg.Xsncoin, cfg.BtcdMode, xsncoinChain, funcName,
+			)
+			if err != nil {
+				err := fmt.Errorf("unable to load RPC "+
+					"credentials for btcd: %v", err)
+				return nil, err
+			}
+		case "xsnd":
+			if cfg.Xsncoin.SimNet {
+				return nil, fmt.Errorf("%s: bitcoind does not "+
+					"support simnet", funcName)
+			}
+
+			err := parseRPCParams(
+				cfg.Xsncoin, cfg.XsndMode, xsncoinChain, funcName,
+			)
+			if err != nil {
+				err := fmt.Errorf("unable to load RPC "+
+					"credentials for xsnd: %v", err)
+				return nil, err
+			}
+		case "neutrino":
+			// No need to get RPC parameters.
+		default:
+			str := "%s: only btcd, bitcoind, and neutrino mode " +
+				"supported for bitcoin at this time"
+			return nil, fmt.Errorf(str, funcName)
+		}
+
+		cfg.Xsncoin.ChainDir = filepath.Join(cfg.DataDir,
+			defaultChainSubDirname,
+			xsncoinChain.String())
+
+                // Finally we'll register the xsncoin chain as our current
+                // primary chain.
+                registeredChains.RegisterPrimaryChain(xsncoinChain)
+                maxFundingAmount = maxXsnFundingAmount
+                maxPaymentMSat = maxXsnPaymentMSat
+
 	}
 
 	// Ensure that the user didn't attempt to specify negative values for
@@ -1205,6 +1319,9 @@ func parseRPCParams(cConfig *chainConfig, nodeConfig interface{}, net chainCode,
 			daemonName = "litecoind"
 			confDir = conf.Dir
 			confFile = "litecoin"
+		case xsncoinChain:
+			confDir = conf.Dir
+			confFile = "bitcoin"
 		}
 
 		// If not all of the parameters are set, we'll assume the user
@@ -1241,7 +1358,7 @@ func parseRPCParams(cConfig *chainConfig, nodeConfig interface{}, net chainCode,
 				err)
 		}
 		nConf.RPCUser, nConf.RPCPass = rpcUser, rpcPass
-	case "bitcoind", "litecoind":
+	case "bitcoind", "litecoind", "xsnd":
 		nConf := nodeConfig.(*bitcoindConfig)
 		rpcUser, rpcPass, zmqBlockHost, zmqTxHost, err :=
 			extractBitcoindRPCParams(confFile)

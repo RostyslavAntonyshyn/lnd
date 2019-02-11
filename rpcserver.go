@@ -64,6 +64,11 @@ const (
 	// permitted.
 	maxLtcPaymentMSat = lnwire.MilliSatoshi(math.MaxUint32) *
 		btcToLtcConversionRate
+
+        // maxXsnPaymentMSat is the maximum allowed Xsncoin payment currently
+        // permitted.
+        maxXsnPaymentMSat = lnwire.MilliSatoshi(math.MaxUint32) *
+                btcToXsnConversionRate
 )
 
 var (
