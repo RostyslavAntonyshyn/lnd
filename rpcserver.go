@@ -46,6 +46,11 @@ const (
 	// permitted.
 	maxLtcPaymentMSat = lnwire.MilliSatoshi(math.MaxUint32) *
 		btcToLtcConversionRate
+
+        // maxXsnPaymentMSat is the maximum allowed Xsncoin payment currently
+        // permitted.
+        maxXsnPaymentMSat = lnwire.MilliSatoshi(math.MaxUint32) *
+                btcToXsnConversionRate
 )
 
 var (
@@ -2574,6 +2579,9 @@ func (r *rpcServer) AddInvoice(ctx context.Context,
 		defaultDelta := cfg.Bitcoin.TimeLockDelta
 		if registeredChains.PrimaryChain() == litecoinChain {
 			defaultDelta = cfg.Litecoin.TimeLockDelta
+		}
+		if registeredChains.PrimaryChain() == xsncoinChain {
+			defaultDelta = cfg.Xsncoin.TimeLockDelta
 		}
 		options = append(options, zpay32.CLTVExpiry(uint64(defaultDelta)))
 	}
