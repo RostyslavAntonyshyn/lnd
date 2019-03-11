@@ -122,6 +122,18 @@ func assertTxInBlock(t *harnessTest, block *wire.MsgBlock, txid *chainhash.Hash)
 	t.Fatalf("tx was not included in block")
 }
 
+func rpcPointToWirePoint(t *harnessTest, chanPoint *lnrpc.ChannelPoint) wire.OutPoint {
+	txid, err := getChanPointFundingTxid(chanPoint)
+	if err != nil {
+		t.Fatalf("unable to get txid: %v", err)
+	}
+
+	return wire.OutPoint{
+		Hash:  *txid,
+		Index: chanPoint.OutputIndex,
+	}
+}
+
 // mineBlocks mine 'num' of blocks and check that blocks are present in
 // node blockchain. numTxs should be set to the number of transactions
 // (excluding the coinbase) we expect to be included in the first mined block.
@@ -192,13 +204,9 @@ func openChannelAndAssert(ctx context.Context, t *harnessTest,
 	if err != nil {
 		t.Fatalf("error while waiting for channel open: %v", err)
 	}
-	txidHash, err := getChanPointFundingTxid(fundingChanPoint)
+	fundingTxID, err := getChanPointFundingTxid(fundingChanPoint)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	fundingTxID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	assertTxInBlock(t, block, fundingTxID)
 
@@ -297,13 +305,9 @@ func assertChannelClosed(ctx context.Context, t *harnessTest,
 	fundingChanPoint *lnrpc.ChannelPoint,
 	closeUpdates lnrpc.Lightning_CloseChannelClient) *chainhash.Hash {
 
-	txidHash, err := getChanPointFundingTxid(fundingChanPoint)
+	txid, err := getChanPointFundingTxid(fundingChanPoint)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	txid, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to convert to chainhash: %v", err)
 	}
 	chanPointStr := fmt.Sprintf("%v:%v", txid, fundingChanPoint.OutputIndex)
 
@@ -369,12 +373,7 @@ func assertChannelClosed(ctx context.Context, t *harnessTest,
 func waitForChannelPendingForceClose(ctx context.Context,
 	node *lntest.HarnessNode, fundingChanPoint *lnrpc.ChannelPoint) error {
 
-	txidHash, err := getChanPointFundingTxid(fundingChanPoint)
-	if err != nil {
-		return err
-	}
-
-	txid, err := chainhash.NewHash(txidHash)
+	txid, err := getChanPointFundingTxid(fundingChanPoint)
 	if err != nil {
 		return err
 	}
@@ -584,7 +583,9 @@ func completePaymentRequests(ctx context.Context, client lnrpc.LightningClient,
 	}
 
 	for _, payReq := range paymentRequests {
-		sendReq := &lnrpc.SendRequest{PaymentRequest: payReq}
+		sendReq := &lnrpc.SendRequest{
+			PaymentRequest: payReq,
+		}
 		err := payStream.Send(sendReq)
 		if err != nil {
 			return err
@@ -1020,11 +1021,7 @@ func testUnconfirmedChannelFunding(net *lntest.NetworkHarness, t *harnessTest) {
 
 // txStr returns the string representation of the channel's funding transaction.
 func txStr(chanPoint *lnrpc.ChannelPoint) string {
-	txidHash, err := getChanPointFundingTxid(chanPoint)
-	if err != nil {
-		return ""
-	}
-	fundingTxID, err := chainhash.NewHash(txidHash)
+	fundingTxID, err := getChanPointFundingTxid(chanPoint)
 	if err != nil {
 		return ""
 	}
@@ -2693,13 +2690,9 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 
 	// Compute the outpoint of the channel, which we will use repeatedly to
 	// locate the pending channel information in the rpc responses.
-	txidHash, err := getChanPointFundingTxid(chanPoint)
+	txid, err := getChanPointFundingTxid(chanPoint)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	txid, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	op := wire.OutPoint{
 		Hash:  *txid,
@@ -3920,13 +3913,9 @@ func testMultiHopPayments(net *lntest.NetworkHarness, t *harnessTest) {
 	)
 	networkChans = append(networkChans, chanPointAlice)
 
-	txidHash, err := getChanPointFundingTxid(chanPointAlice)
+	aliceChanTXID, err := getChanPointFundingTxid(chanPointAlice)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	aliceChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	aliceFundPoint := wire.OutPoint{
 		Hash:  *aliceChanTXID,
@@ -3963,13 +3952,9 @@ func testMultiHopPayments(net *lntest.NetworkHarness, t *harnessTest) {
 		},
 	)
 	networkChans = append(networkChans, chanPointDave)
-	txidHash, err = getChanPointFundingTxid(chanPointDave)
+	daveChanTXID, err := getChanPointFundingTxid(chanPointDave)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	daveChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	daveFundPoint := wire.OutPoint{
 		Hash:  *daveChanTXID,
@@ -4002,13 +3987,9 @@ func testMultiHopPayments(net *lntest.NetworkHarness, t *harnessTest) {
 	)
 	networkChans = append(networkChans, chanPointCarol)
 
-	txidHash, err = getChanPointFundingTxid(chanPointCarol)
+	carolChanTXID, err := getChanPointFundingTxid(chanPointCarol)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	carolChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	carolFundPoint := wire.OutPoint{
 		Hash:  *carolChanTXID,
@@ -4020,13 +4001,9 @@ func testMultiHopPayments(net *lntest.NetworkHarness, t *harnessTest) {
 	nodeNames := []string{"Alice", "Bob", "Carol", "Dave"}
 	for _, chanPoint := range networkChans {
 		for i, node := range nodes {
-			txidHash, err := getChanPointFundingTxid(chanPoint)
+			txid, err := getChanPointFundingTxid(chanPoint)
 			if err != nil {
 				t.Fatalf("unable to get txid: %v", err)
-			}
-			txid, e := chainhash.NewHash(txidHash)
-			if e != nil {
-				t.Fatalf("unable to create sha hash: %v", e)
 			}
 			point := wire.OutPoint{
 				Hash:  *txid,
@@ -4214,13 +4191,9 @@ func testSingleHopSendToRoute(net *lntest.NetworkHarness, t *harnessTest) {
 	)
 	networkChans = append(networkChans, chanPointAlice)
 
-	txidHash, err := getChanPointFundingTxid(chanPointAlice)
+	aliceChanTXID, err := getChanPointFundingTxid(chanPointAlice)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	aliceChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	aliceFundPoint := wire.OutPoint{
 		Hash:  *aliceChanTXID,
@@ -4232,13 +4205,9 @@ func testSingleHopSendToRoute(net *lntest.NetworkHarness, t *harnessTest) {
 	nodeNames := []string{"Alice", "Bob"}
 	for _, chanPoint := range networkChans {
 		for i, node := range nodes {
-			txidHash, err := getChanPointFundingTxid(chanPoint)
+			txid, err := getChanPointFundingTxid(chanPoint)
 			if err != nil {
 				t.Fatalf("unable to get txid: %v", err)
-			}
-			txid, e := chainhash.NewHash(txidHash)
-			if e != nil {
-				t.Fatalf("unable to create sha hash: %v", e)
 			}
 			point := wire.OutPoint{
 				Hash:  *txid,
@@ -4359,13 +4328,9 @@ func testMultiHopSendToRoute(net *lntest.NetworkHarness, t *harnessTest) {
 	)
 	networkChans = append(networkChans, chanPointAlice)
 
-	txidHash, err := getChanPointFundingTxid(chanPointAlice)
+	aliceChanTXID, err := getChanPointFundingTxid(chanPointAlice)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	aliceChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	aliceFundPoint := wire.OutPoint{
 		Hash:  *aliceChanTXID,
@@ -4398,13 +4363,9 @@ func testMultiHopSendToRoute(net *lntest.NetworkHarness, t *harnessTest) {
 		},
 	)
 	networkChans = append(networkChans, chanPointBob)
-	txidHash, err = getChanPointFundingTxid(chanPointBob)
+	bobChanTXID, err := getChanPointFundingTxid(chanPointBob)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	bobChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	bobFundPoint := wire.OutPoint{
 		Hash:  *bobChanTXID,
@@ -4416,13 +4377,9 @@ func testMultiHopSendToRoute(net *lntest.NetworkHarness, t *harnessTest) {
 	nodeNames := []string{"Alice", "Bob", "Carol"}
 	for _, chanPoint := range networkChans {
 		for i, node := range nodes {
-			txidHash, err := getChanPointFundingTxid(chanPoint)
+			txid, err := getChanPointFundingTxid(chanPoint)
 			if err != nil {
 				t.Fatalf("unable to get txid: %v", err)
-			}
-			txid, e := chainhash.NewHash(txidHash)
-			if e != nil {
-				t.Fatalf("unable to create sha hash: %v", e)
 			}
 			point := wire.OutPoint{
 				Hash:  *txid,
@@ -4805,13 +4762,9 @@ func testPrivateChannels(net *lntest.NetworkHarness, t *harnessTest) {
 	)
 	networkChans = append(networkChans, chanPointAlice)
 
-	txidHash, err := getChanPointFundingTxid(chanPointAlice)
+	aliceChanTXID, err := getChanPointFundingTxid(chanPointAlice)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	aliceChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	aliceFundPoint := wire.OutPoint{
 		Hash:  *aliceChanTXID,
@@ -4842,13 +4795,9 @@ func testPrivateChannels(net *lntest.NetworkHarness, t *harnessTest) {
 		},
 	)
 	networkChans = append(networkChans, chanPointDave)
-	txidHash, err = getChanPointFundingTxid(chanPointDave)
+	daveChanTXID, err := getChanPointFundingTxid(chanPointDave)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	daveChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	daveFundPoint := wire.OutPoint{
 		Hash:  *daveChanTXID,
@@ -4881,13 +4830,9 @@ func testPrivateChannels(net *lntest.NetworkHarness, t *harnessTest) {
 	)
 	networkChans = append(networkChans, chanPointCarol)
 
-	txidHash, err = getChanPointFundingTxid(chanPointCarol)
+	carolChanTXID, err := getChanPointFundingTxid(chanPointCarol)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	carolChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	carolFundPoint := wire.OutPoint{
 		Hash:  *carolChanTXID,
@@ -4900,13 +4845,9 @@ func testPrivateChannels(net *lntest.NetworkHarness, t *harnessTest) {
 	nodeNames := []string{"Alice", "Bob", "Carol", "Dave"}
 	for _, chanPoint := range networkChans {
 		for i, node := range nodes {
-			txidHash, err := getChanPointFundingTxid(chanPoint)
+			txid, err := getChanPointFundingTxid(chanPoint)
 			if err != nil {
 				t.Fatalf("unable to get txid: %v", err)
-			}
-			txid, e := chainhash.NewHash(txidHash)
-			if e != nil {
-				t.Fatalf("unable to create sha hash: %v", e)
 			}
 			point := wire.OutPoint{
 				Hash:  *txid,
@@ -4949,13 +4890,9 @@ func testPrivateChannels(net *lntest.NetworkHarness, t *harnessTest) {
 	if err != nil {
 		t.Fatalf("error while waiting for channel open: %v", err)
 	}
-	txidHash, err = getChanPointFundingTxid(chanPointPrivate)
+	fundingTxID, err := getChanPointFundingTxid(chanPointPrivate)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	fundingTxID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	assertTxInBlock(t, block, fundingTxID)
 
@@ -5392,13 +5329,9 @@ func testMultiHopOverPrivateChannels(net *lntest.NetworkHarness, t *harnessTest)
 	}
 
 	// Retrieve Alice's funding outpoint.
-	txidHash, err := getChanPointFundingTxid(chanPointAlice)
+	aliceChanTXID, err := getChanPointFundingTxid(chanPointAlice)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	aliceChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	aliceFundPoint := wire.OutPoint{
 		Hash:  *aliceChanTXID,
@@ -5445,13 +5378,9 @@ func testMultiHopOverPrivateChannels(net *lntest.NetworkHarness, t *harnessTest)
 	}
 
 	// Retrieve Bob's funding outpoint.
-	txidHash, err = getChanPointFundingTxid(chanPointBob)
+	bobChanTXID, err := getChanPointFundingTxid(chanPointBob)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	bobChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	bobFundPoint := wire.OutPoint{
 		Hash:  *bobChanTXID,
@@ -5504,13 +5433,9 @@ func testMultiHopOverPrivateChannels(net *lntest.NetworkHarness, t *harnessTest)
 	}
 
 	// Retrieve Carol's funding point.
-	txidHash, err = getChanPointFundingTxid(chanPointCarol)
+	carolChanTXID, err := getChanPointFundingTxid(chanPointCarol)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	carolChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	carolFundPoint := wire.OutPoint{
 		Hash:  *carolChanTXID,
@@ -6123,13 +6048,9 @@ func testMaxPendingChannels(net *lntest.NetworkHarness, t *harnessTest) {
 			t.Fatalf("error while waiting for channel open: %v", err)
 		}
 
-		txidHash, err := getChanPointFundingTxid(fundingChanPoint)
+		fundingTxID, err := getChanPointFundingTxid(fundingChanPoint)
 		if err != nil {
 			t.Fatalf("unable to get txid: %v", err)
-		}
-		fundingTxID, err := chainhash.NewHash(txidHash)
-		if err != nil {
-			t.Fatalf("unable to create sha hash: %v", err)
 		}
 
 		// Ensure that the funding transaction enters a block, and is
@@ -9481,13 +9402,9 @@ func testMultiHopHtlcLocalTimeout(net *lntest.NetworkHarness, t *harnessTest) {
 	}
 
 	// Bob's force close transaction should now be found in the mempool.
-	txidHash, err := getChanPointFundingTxid(bobChanPoint)
+	bobFundingTxid, err := getChanPointFundingTxid(bobChanPoint)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	bobFundingTxid, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	assertSpendingTxInMempool(
 		t, net.Miner.Node, minerMempoolTimeout, wire.OutPoint{
@@ -9715,14 +9632,9 @@ func testMultiHopReceiverChainClaim(net *lntest.NetworkHarness, t *harnessTest) 
 		t.Fatalf("expected transaction not found in mempool: %v", err)
 	}
 
-	txidHash, err := getChanPointFundingTxid(bobChanPoint)
+	bobFundingTxid, err := getChanPointFundingTxid(bobChanPoint)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-
-	bobFundingTxid, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 
 	carolFundingPoint := wire.OutPoint{
@@ -10454,13 +10366,9 @@ func testMultiHopHtlcLocalChainClaim(net *lntest.NetworkHarness, t *harnessTest)
 	if err != nil {
 		t.Fatalf("transactions not found in mempool: %v", err)
 	}
-	txidHash, err := getChanPointFundingTxid(bobChanPoint)
+	bobFundingTxid, err := getChanPointFundingTxid(bobChanPoint)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	bobFundingTxid, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	carolFundingPoint := wire.OutPoint{
 		Hash:  *bobFundingTxid,
@@ -10809,13 +10717,9 @@ func testMultiHopHtlcRemoteChainClaim(net *lntest.NetworkHarness, t *harnessTest
 	if err != nil {
 		t.Fatalf("transactions not found in mempool: %v", err)
 	}
-	txidHash, err := getChanPointFundingTxid(bobChanPoint)
+	bobFundingTxid, err := getChanPointFundingTxid(bobChanPoint)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	bobFundingTxid, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	carolFundingPoint := wire.OutPoint{
 		Hash:  *bobFundingTxid,
@@ -11019,13 +10923,9 @@ func testSwitchCircuitPersistence(net *lntest.NetworkHarness, t *harnessTest) {
 	)
 	networkChans = append(networkChans, chanPointAlice)
 
-	txidHash, err := getChanPointFundingTxid(chanPointAlice)
+	aliceChanTXID, err := getChanPointFundingTxid(chanPointAlice)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	aliceChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	aliceFundPoint := wire.OutPoint{
 		Hash:  *aliceChanTXID,
@@ -11063,13 +10963,9 @@ func testSwitchCircuitPersistence(net *lntest.NetworkHarness, t *harnessTest) {
 		},
 	)
 	networkChans = append(networkChans, chanPointDave)
-	txidHash, err = getChanPointFundingTxid(chanPointDave)
+	daveChanTXID, err := getChanPointFundingTxid(chanPointDave)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	daveChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	daveFundPoint := wire.OutPoint{
 		Hash:  *daveChanTXID,
@@ -11104,13 +11000,9 @@ func testSwitchCircuitPersistence(net *lntest.NetworkHarness, t *harnessTest) {
 	)
 	networkChans = append(networkChans, chanPointCarol)
 
-	txidHash, err = getChanPointFundingTxid(chanPointCarol)
+	carolChanTXID, err := getChanPointFundingTxid(chanPointCarol)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	carolChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	carolFundPoint := wire.OutPoint{
 		Hash:  *carolChanTXID,
@@ -11122,13 +11014,9 @@ func testSwitchCircuitPersistence(net *lntest.NetworkHarness, t *harnessTest) {
 	nodeNames := []string{"Alice", "Bob", "Carol", "Dave"}
 	for _, chanPoint := range networkChans {
 		for i, node := range nodes {
-			txidHash, err := getChanPointFundingTxid(chanPoint)
+			txid, err := getChanPointFundingTxid(chanPoint)
 			if err != nil {
 				t.Fatalf("unable to get txid: %v", err)
-			}
-			txid, e := chainhash.NewHash(txidHash)
-			if e != nil {
-				t.Fatalf("unable to create sha hash: %v", e)
 			}
 			point := wire.OutPoint{
 				Hash:  *txid,
@@ -11358,13 +11246,9 @@ func testSwitchOfflineDelivery(net *lntest.NetworkHarness, t *harnessTest) {
 	)
 	networkChans = append(networkChans, chanPointAlice)
 
-	txidHash, err := getChanPointFundingTxid(chanPointAlice)
+	aliceChanTXID, err := getChanPointFundingTxid(chanPointAlice)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	aliceChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	aliceFundPoint := wire.OutPoint{
 		Hash:  *aliceChanTXID,
@@ -11402,13 +11286,9 @@ func testSwitchOfflineDelivery(net *lntest.NetworkHarness, t *harnessTest) {
 		},
 	)
 	networkChans = append(networkChans, chanPointDave)
-	txidHash, err = getChanPointFundingTxid(chanPointDave)
+	daveChanTXID, err := getChanPointFundingTxid(chanPointDave)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	daveChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	daveFundPoint := wire.OutPoint{
 		Hash:  *daveChanTXID,
@@ -11443,13 +11323,9 @@ func testSwitchOfflineDelivery(net *lntest.NetworkHarness, t *harnessTest) {
 	)
 	networkChans = append(networkChans, chanPointCarol)
 
-	txidHash, err = getChanPointFundingTxid(chanPointCarol)
+	carolChanTXID, err := getChanPointFundingTxid(chanPointCarol)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	carolChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	carolFundPoint := wire.OutPoint{
 		Hash:  *carolChanTXID,
@@ -11461,13 +11337,9 @@ func testSwitchOfflineDelivery(net *lntest.NetworkHarness, t *harnessTest) {
 	nodeNames := []string{"Alice", "Bob", "Carol", "Dave"}
 	for _, chanPoint := range networkChans {
 		for i, node := range nodes {
-			txidHash, err := getChanPointFundingTxid(chanPoint)
+			txid, err := getChanPointFundingTxid(chanPoint)
 			if err != nil {
 				t.Fatalf("unable to get txid: %v", err)
-			}
-			txid, e := chainhash.NewHash(txidHash)
-			if e != nil {
-				t.Fatalf("unable to create sha hash: %v", e)
 			}
 			point := wire.OutPoint{
 				Hash:  *txid,
@@ -11704,13 +11576,9 @@ func testSwitchOfflineDeliveryPersistence(net *lntest.NetworkHarness, t *harness
 	)
 	networkChans = append(networkChans, chanPointAlice)
 
-	txidHash, err := getChanPointFundingTxid(chanPointAlice)
+	aliceChanTXID, err := getChanPointFundingTxid(chanPointAlice)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	aliceChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	aliceFundPoint := wire.OutPoint{
 		Hash:  *aliceChanTXID,
@@ -11749,13 +11617,9 @@ func testSwitchOfflineDeliveryPersistence(net *lntest.NetworkHarness, t *harness
 	)
 
 	networkChans = append(networkChans, chanPointDave)
-	txidHash, err = getChanPointFundingTxid(chanPointDave)
+	daveChanTXID, err := getChanPointFundingTxid(chanPointDave)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	daveChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	daveFundPoint := wire.OutPoint{
 		Hash:  *daveChanTXID,
@@ -11790,13 +11654,9 @@ func testSwitchOfflineDeliveryPersistence(net *lntest.NetworkHarness, t *harness
 	)
 	networkChans = append(networkChans, chanPointCarol)
 
-	txidHash, err = getChanPointFundingTxid(chanPointCarol)
+	carolChanTXID, err := getChanPointFundingTxid(chanPointCarol)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	carolChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	carolFundPoint := wire.OutPoint{
 		Hash:  *carolChanTXID,
@@ -11808,13 +11668,9 @@ func testSwitchOfflineDeliveryPersistence(net *lntest.NetworkHarness, t *harness
 	nodeNames := []string{"Alice", "Bob", "Carol", "Dave"}
 	for _, chanPoint := range networkChans {
 		for i, node := range nodes {
-			txidHash, err := getChanPointFundingTxid(chanPoint)
+			txid, err := getChanPointFundingTxid(chanPoint)
 			if err != nil {
 				t.Fatalf("unable to get txid: %v", err)
-			}
-			txid, e := chainhash.NewHash(txidHash)
-			if e != nil {
-				t.Fatalf("unable to create sha hash: %v", e)
 			}
 			point := wire.OutPoint{
 				Hash:  *txid,
@@ -12057,13 +11913,9 @@ func testSwitchOfflineDeliveryOutgoingOffline(
 	)
 	networkChans = append(networkChans, chanPointAlice)
 
-	txidHash, err := getChanPointFundingTxid(chanPointAlice)
+	aliceChanTXID, err := getChanPointFundingTxid(chanPointAlice)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	aliceChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	aliceFundPoint := wire.OutPoint{
 		Hash:  *aliceChanTXID,
@@ -12101,13 +11953,9 @@ func testSwitchOfflineDeliveryOutgoingOffline(
 		},
 	)
 	networkChans = append(networkChans, chanPointDave)
-	txidHash, err = getChanPointFundingTxid(chanPointDave)
+	daveChanTXID, err := getChanPointFundingTxid(chanPointDave)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	daveChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	daveFundPoint := wire.OutPoint{
 		Hash:  *daveChanTXID,
@@ -12140,13 +11988,9 @@ func testSwitchOfflineDeliveryOutgoingOffline(
 	)
 	networkChans = append(networkChans, chanPointCarol)
 
-	txidHash, err = getChanPointFundingTxid(chanPointCarol)
+	carolChanTXID, err := getChanPointFundingTxid(chanPointCarol)
 	if err != nil {
 		t.Fatalf("unable to get txid: %v", err)
-	}
-	carolChanTXID, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to create sha hash: %v", err)
 	}
 	carolFundPoint := wire.OutPoint{
 		Hash:  *carolChanTXID,
@@ -12158,13 +12002,9 @@ func testSwitchOfflineDeliveryOutgoingOffline(
 	nodeNames := []string{"Alice", "Bob", "Carol", "Dave"}
 	for _, chanPoint := range networkChans {
 		for i, node := range nodes {
-			txidHash, err := getChanPointFundingTxid(chanPoint)
+			txid, err := getChanPointFundingTxid(chanPoint)
 			if err != nil {
 				t.Fatalf("unable to get txid: %v", err)
-			}
-			txid, e := chainhash.NewHash(txidHash)
-			if e != nil {
-				t.Fatalf("unable to create sha hash: %v", e)
 			}
 			point := wire.OutPoint{
 				Hash:  *txid,
@@ -12410,13 +12250,9 @@ func testQueryRoutes(net *lntest.NetworkHarness, t *harnessTest) {
 	nodeNames := []string{"Alice", "Bob", "Carol", "Dave"}
 	for _, chanPoint := range networkChans {
 		for i, node := range nodes {
-			txidHash, err := getChanPointFundingTxid(chanPoint)
+			txid, err := getChanPointFundingTxid(chanPoint)
 			if err != nil {
 				t.Fatalf("unable to get txid: %v", err)
-			}
-			txid, e := chainhash.NewHash(txidHash)
-			if e != nil {
-				t.Fatalf("unable to create sha hash: %v", e)
 			}
 			point := wire.OutPoint{
 				Hash:  *txid,
@@ -12627,13 +12463,9 @@ func testRouteFeeCutoff(net *lntest.NetworkHarness, t *harnessTest) {
 	}
 	for _, chanPoint := range networkChans {
 		for i, node := range nodes {
-			txidHash, err := getChanPointFundingTxid(chanPoint)
+			txid, err := getChanPointFundingTxid(chanPoint)
 			if err != nil {
 				t.Fatalf("unable to get txid: %v", err)
-			}
-			txid, e := chainhash.NewHash(txidHash)
-			if e != nil {
-				t.Fatalf("unable to create sha hash: %v", e)
 			}
 			outpoint := wire.OutPoint{
 				Hash:  *txid,
