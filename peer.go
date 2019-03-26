@@ -1021,7 +1021,12 @@ func (p *peer) readHandler() {
 out:
 	for atomic.LoadInt32(&p.disconnect) == 0 {
 		nextMsg, err := p.readNextMessage()
-		idleTimer.Stop()
+		if !idleTimer.Stop() {
+			select {
+			case <-idleTimer.C:
+			default:
+			}
+		}
 		if err != nil {
 			peerLog.Infof("unable to read message from %v: %v",
 				p, err)
@@ -1443,6 +1448,14 @@ func (p *peer) writeMessage(msg lnwire.Message) error {
 //
 // NOTE: This method MUST be run as a goroutine.
 func (p *peer) writeHandler() {
+	// We'll stop the timer after a new messages is sent, and also reset it
+	// after we process the next message.
+	idleTimer := time.AfterFunc(idleTimeout, func() {
+		err := fmt.Errorf("Peer %s no write for %s -- disconnecting",
+			p, idleTimeout)
+		p.Disconnect(err)
+	})
+
 	var exitErr error
 
 	const (
@@ -1516,6 +1529,16 @@ out:
 
 				goto retryWithDelay
 			}
+
+			// The write succeeded, reset the idle timer to prevent
+			// us from disconnecting the peer.
+			if !idleTimer.Stop() {
+				select {
+				case <-idleTimer.C:
+				default:
+				}
+			}
+			idleTimer.Reset(idleTimeout)
 
 			// If the peer requested a synchronous write, respond
 			// with the error.
