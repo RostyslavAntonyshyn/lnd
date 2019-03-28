@@ -625,9 +625,8 @@ func makeFakePayHash(t *harnessTest) []byte {
 
 // createPayReqs is a helper method that will create a slice of payment
 // requests for the given node.
-func createPayReqs(ctx context.Context, node *lntest.HarnessNode,
-	paymentAmt btcutil.Amount, numInvoices int) ([]string, [][]byte,
-	[]*lnrpc.Invoice, error) {
+func createPayReqs(node *lntest.HarnessNode, paymentAmt btcutil.Amount,
+	numInvoices int) ([]string, [][]byte, []*lnrpc.Invoice, error) {
 
 	payReqs := make([]string, numInvoices)
 	rHashes := make([][]byte, numInvoices)
@@ -644,7 +643,10 @@ func createPayReqs(ctx context.Context, node *lntest.HarnessNode,
 			RPreimage: preimage,
 			Value:     int64(paymentAmt),
 		}
-		resp, err := node.AddInvoice(ctx, invoice)
+		ctxt, _ := context.WithTimeout(
+			context.Background(), defaultTimeout,
+		)
+		resp, err := node.AddInvoice(ctxt, invoice)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("unable to add "+
 				"invoice: %v", err)
@@ -4045,9 +4047,8 @@ func testMultiHopPayments(net *lntest.NetworkHarness, t *harnessTest) {
 	// satoshis with a different preimage each time.
 	const numPayments = 5
 	const paymentAmt = 1000
-	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 	payReqs, _, _, err := createPayReqs(
-		ctxt, net.Bob, paymentAmt, numPayments,
+		net.Bob, paymentAmt, numPayments,
 	)
 	if err != nil {
 		t.Fatalf("unable to create pay reqs: %v", err)
@@ -4274,9 +4275,8 @@ func testSingleHopSendToRoute(net *lntest.NetworkHarness, t *harnessTest) {
 	// Create 5 invoices for Bob, which expect a payment from Alice for 1k
 	// satoshis with a different preimage each time.
 	const numPayments = 5
-	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 	_, rHashes, _, err := createPayReqs(
-		ctxt, net.Bob, paymentAmt, numPayments,
+		net.Bob, paymentAmt, numPayments,
 	)
 	if err != nil {
 		t.Fatalf("unable to create pay reqs: %v", err)
@@ -4459,9 +4459,8 @@ func testMultiHopSendToRoute(net *lntest.NetworkHarness, t *harnessTest) {
 	// Create 5 invoices for Carol, which expect a payment from Alice for 1k
 	// satoshis with a different preimage each time.
 	const numPayments = 5
-	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 	_, rHashes, _, err := createPayReqs(
-		ctxt, carol, paymentAmt, numPayments,
+		carol, paymentAmt, numPayments,
 	)
 	if err != nil {
 		t.Fatalf("unable to create pay reqs: %v", err)
@@ -4986,9 +4985,8 @@ func testPrivateChannels(net *lntest.NetworkHarness, t *harnessTest) {
 	// by only using one of the channels.
 	const numPayments = 2
 	const paymentAmt = 70000
-	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 	payReqs, _, _, err := createPayReqs(
-		ctxt, net.Bob, paymentAmt, numPayments,
+		net.Bob, paymentAmt, numPayments,
 	)
 	if err != nil {
 		t.Fatalf("unable to create pay reqs: %v", err)
@@ -5043,9 +5041,8 @@ func testPrivateChannels(net *lntest.NetworkHarness, t *harnessTest) {
 	// Alice should also be able to route payments using this channel,
 	// so send two payments of 60k back to Carol.
 	const paymentAmt60k = 60000
-	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 	payReqs, _, _, err = createPayReqs(
-		ctxt, carol, paymentAmt60k, numPayments,
+		carol, paymentAmt60k, numPayments,
 	)
 	if err != nil {
 		t.Fatalf("unable to create pay reqs: %v", err)
@@ -5706,9 +5703,8 @@ func testInvoiceSubscriptions(net *lntest.NetworkHarness, t *harnessTest) {
 
 	// We'll now add 3 more invoices to Bob's invoice registry.
 	const numInvoices = 3
-	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 	payReqs, _, newInvoices, err := createPayReqs(
-		ctxt, net.Bob, paymentAmt, numInvoices,
+		net.Bob, paymentAmt, numInvoices,
 	)
 	if err != nil {
 		t.Fatalf("unable to create pay reqs: %v", err)
@@ -6724,9 +6720,8 @@ func testRevokedCloseRetribution(net *lntest.NetworkHarness, t *harnessTest) {
 
 	// With the channel open, we'll create a few invoices for Bob that
 	// Carol will pay to in order to advance the state of the channel.
-	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 	bobPayReqs, _, _, err := createPayReqs(
-		ctxt, net.Bob, paymentAmt, numInvoices,
+		net.Bob, paymentAmt, numInvoices,
 	)
 	if err != nil {
 		t.Fatalf("unable to create pay reqs: %v", err)
@@ -6988,9 +6983,8 @@ func testRevokedCloseRetributionZeroValueRemoteOutput(net *lntest.NetworkHarness
 
 	// With the channel open, we'll create a few invoices for Carol that
 	// Dave will pay to in order to advance the state of the channel.
-	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 	carolPayReqs, _, _, err := createPayReqs(
-		ctxt, carol, paymentAmt, numInvoices,
+		carol, paymentAmt, numInvoices,
 	)
 	if err != nil {
 		t.Fatalf("unable to create pay reqs: %v", err)
@@ -7240,9 +7234,8 @@ func testRevokedCloseRetributionRemoteHodl(net *lntest.NetworkHarness,
 
 	// With the channel open, we'll create a few invoices for Carol that
 	// Dave will pay to in order to advance the state of the channel.
-	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 	carolPayReqs, _, _, err := createPayReqs(
-		ctxt, carol, paymentAmt, numInvoices,
+		carol, paymentAmt, numInvoices,
 	)
 	if err != nil {
 		t.Fatalf("unable to create pay reqs: %v", err)
@@ -7303,9 +7296,8 @@ func testRevokedCloseRetributionRemoteHodl(net *lntest.NetworkHarness,
 	// At this point, we'll also send over a set of HTLC's from Carol to
 	// Dave. This ensures that the final revoked transaction has HTLC's in
 	// both directions.
-	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 	davePayReqs, _, _, err := createPayReqs(
-		ctxt, dave, paymentAmt, numInvoices,
+		dave, paymentAmt, numInvoices,
 	)
 	if err != nil {
 		t.Fatalf("unable to create pay reqs: %v", err)
@@ -7694,9 +7686,8 @@ func testDataLossProtection(net *lntest.NetworkHarness, t *harnessTest) {
 		// the channel.
 		// TODO(halseth): have dangling HTLCs on the commitment, able to
 		// retrive funds?
-		ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 		payReqs, _, _, err := createPayReqs(
-			ctxt, node, paymentAmt, numInvoices,
+			node, paymentAmt, numInvoices,
 		)
 		if err != nil {
 			t.Fatalf("unable to create pay reqs: %v", err)
@@ -8892,9 +8883,8 @@ func testAsyncPayments(net *lntest.NetworkHarness, t *harnessTest) {
 
 	// With the channel open, we'll create invoices for Bob that Alice
 	// will pay to in order to advance the state of the channel.
-	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 	bobPayReqs, _, _, err := createPayReqs(
-		ctxt, net.Bob, paymentAmt, numInvoices,
+		net.Bob, paymentAmt, numInvoices,
 	)
 	if err != nil {
 		t.Fatalf("unable to create pay reqs: %v", err)
@@ -9044,9 +9034,8 @@ func testBidirectionalAsyncPayments(net *lntest.NetworkHarness, t *harnessTest) 
 
 	// With the channel open, we'll create invoices for Bob that Alice
 	// will pay to in order to advance the state of the channel.
-	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 	bobPayReqs, _, _, err := createPayReqs(
-		ctxt, net.Bob, paymentAmt, numInvoices,
+		net.Bob, paymentAmt, numInvoices,
 	)
 	if err != nil {
 		t.Fatalf("unable to create pay reqs: %v", err)
@@ -9054,9 +9043,8 @@ func testBidirectionalAsyncPayments(net *lntest.NetworkHarness, t *harnessTest) 
 
 	// With the channel open, we'll create invoices for Alice that Bob
 	// will pay to in order to advance the state of the channel.
-	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 	alicePayReqs, _, _, err := createPayReqs(
-		ctxt, net.Alice, paymentAmt, numInvoices,
+		net.Alice, paymentAmt, numInvoices,
 	)
 	if err != nil {
 		t.Fatalf("unable to create pay reqs: %v", err)
@@ -11161,9 +11149,8 @@ func testSwitchCircuitPersistence(net *lntest.NetworkHarness, t *harnessTest) {
 	// satoshis with a different preimage each time.
 	const numPayments = 5
 	const paymentAmt = 1000
-	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 	payReqs, _, _, err := createPayReqs(
-		ctxt, carol, paymentAmt, numPayments,
+		carol, paymentAmt, numPayments,
 	)
 	if err != nil {
 		t.Fatalf("unable to create pay reqs: %v", err)
@@ -11501,9 +11488,8 @@ func testSwitchOfflineDelivery(net *lntest.NetworkHarness, t *harnessTest) {
 	// satoshis with a different preimage each time.
 	const numPayments = 5
 	const paymentAmt = 1000
-	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 	payReqs, _, _, err := createPayReqs(
-		ctxt, carol, paymentAmt, numPayments,
+		carol, paymentAmt, numPayments,
 	)
 	if err != nil {
 		t.Fatalf("unable to create pay reqs: %v", err)
@@ -11849,9 +11835,8 @@ func testSwitchOfflineDeliveryPersistence(net *lntest.NetworkHarness, t *harness
 	// satoshis with a different preimage each time.
 	const numPayments = 5
 	const paymentAmt = 1000
-	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 	payReqs, _, _, err := createPayReqs(
-		ctxt, carol, paymentAmt, numPayments,
+		carol, paymentAmt, numPayments,
 	)
 	if err != nil {
 		t.Fatalf("unable to create pay reqs: %v", err)
@@ -12200,9 +12185,8 @@ func testSwitchOfflineDeliveryOutgoingOffline(
 	// satoshis with a different preimage each time.
 	const numPayments = 5
 	const paymentAmt = 1000
-	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 	payReqs, _, _, err := createPayReqs(
-		ctxt, carol, paymentAmt, numPayments,
+		carol, paymentAmt, numPayments,
 	)
 	if err != nil {
 		t.Fatalf("unable to create pay reqs: %v", err)
